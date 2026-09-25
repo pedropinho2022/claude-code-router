@@ -574,13 +574,16 @@ function readNumber(value: unknown): number | undefined {
 }
 
 function liveAntigravityAuth(sourceFile?: string): AntigravityTokenSet | undefined {
+  // O token do agy vem primeiro: o login do Gemini CLI deixou de ser aceito
+  // para contas pessoais, mas ainda grava um oauth_creds.json cujo token o
+  // v1internal rejeita com 403.
+  const cliAuth = sourceFile ? undefined : readAntigravityCliAuth();
+  if (cliAuth?.accessToken && !antigravityAccessTokenExpired(cliAuth)) {
+    return cliAuth;
+  }
   const fileAuth = readAntigravityAuth(sourceFile);
   if (fileAuth?.accessToken && !antigravityAccessTokenExpired(fileAuth)) {
     return fileAuth;
-  }
-  const cliAuth = readAntigravityCliAuth();
-  if (cliAuth?.accessToken && !antigravityAccessTokenExpired(cliAuth)) {
-    return cliAuth;
   }
   return readAntigravityKeyringAuth() ?? fileAuth ?? cliAuth;
 }

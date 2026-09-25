@@ -556,10 +556,17 @@ test("Antigravity CLI token expiry locks the candidate without rewriting the CLI
   });
 });
 
-test("Antigravity prefers a live oauth_creds.json token over the CLI token file", async () => {
+test("Antigravity prefers a live CLI token over oauth_creds.json and falls back when it expires", async () => {
   await withAntigravityHome(async (home) => {
-    writeCliToken(home, { token: { access_token: "agy-token", expiry: new Date(futureExpiryMs).toISOString() } });
     writeCredentials(home, { access_token: "gemini-file-token", expiry_date: futureExpiryMs });
+    writeCliToken(home, {
+      auth_method: "oauth",
+      id_token: "id",
+      token: { access_token: "agy-token", expiry: "2100-01-01T00:00:00.973491816-03:00" }
+    });
+    assert.equal((await resolveAntigravityAuth())?.accessToken, "agy-token");
+
+    writeCliToken(home, { token: { access_token: "agy-token", expiry: new Date(pastExpiryMs).toISOString() } });
     assert.equal((await resolveAntigravityAuth())?.accessToken, "gemini-file-token");
   });
 });
