@@ -11,6 +11,7 @@ import {
   antigravityCredentialFile,
   antigravityDefaultBaseUrl,
   antigravityIdentityHeaders,
+  antigravityProviderAccountConfig,
   fetchAntigravityModels,
   importAntigravityProvider,
   loadAntigravityProject,
@@ -25,6 +26,7 @@ import {
 } from "@ccr/core/agents/local-providers/service.ts";
 import { localAgentProviderApiKey } from "@ccr/core/agents/local-providers/shared.ts";
 import { antigravityLanguageServerQuotaEndpoint } from "@ccr/core/providers/antigravity-account.ts";
+import { testProviderAccountConnector } from "@ccr/core/providers/account-service.ts";
 
 const futureExpiryMs = 4_102_444_800_000;
 const pastExpiryMs = 1_000_000_000_000;
@@ -568,5 +570,61 @@ test("Antigravity prefers a live CLI token over oauth_creds.json and falls back 
 
     writeCliToken(home, { token: { access_token: "agy-token", expiry: new Date(pastExpiryMs).toISOString() } });
     assert.equal((await resolveAntigravityAuth())?.accessToken, "gemini-file-token");
+  });
+});
+
+test("Antigravity quota falls back to the cloud summary when the local language server is unavailable", async () => {
+  await withAntigravityHome(async (home) => {
+    const previousLog = process.env.CCR_ANTIGRAVITY_LANGUAGE_SERVER_LOG;
+    process.env.CCR_ANTIGRAVITY_LANGUAGE_SERVER_LOG = path.join(home, "missing-language-server.log");
+    writeCliToken(home, {
+      auth_method: "oauth",
+      token: { access_token: "cli-quota-token", expiry: "2100-01-01T00:00:00.123456789-03:00" }
+    });
+    try {
+      await withStubbedFetch((_count, { url }) => {
+        if (url.endsWith("/v1internal:loadCodeAssist")) {
+          return new Response(JSON.stringify({ cloudaicompanionProject: "quota-project" }), { status: 200 });
+        }
+        if (url.endsWith("/v1internal:retrieveUserQuotaSummary")) {
+          return new Response(JSON.stringify({
+            groups: [
+              {
+                buckets: [
+                  { bucketId: "gemini-weekly", remainingFraction: 0.75, resetTime: "2026-10-02T18:18:26Z", window: "weekly" },
+                  { bucketId: "gemini-5h", remainingFraction: 0.5, resetTime: "2026-09-25T23:18:26Z", window: "5h" }
+                ],
+                displayName: "Gemini Models"
+              },
+              {
+                buckets: [{ bucketId: "3p-weekly", remainingFraction: 0.25, resetTime: "2026-10-02T19:31:44Z", window: "weekly" }],
+                displayName: "Claude and GPT models"
+              }
+            ]
+          }), { status: 200 });
+        }
+        return new Response("{}", { status: 404 });
+      }, async (calls) => {
+        const result = await testProviderAccountConnector({
+          baseUrl: antigravityDefaultBaseUrl,
+          connector: antigravityProviderAccountConfig().connectors[0]
+        });
+
+        assert.deepEqual(
+          result.meters.map((meter) => [meter.id, meter.remaining]),
+          [["antigravity_gemini_weekly", 75], ["antigravity_gemini_5h", 50], ["antigravity_3p_weekly", 25]]
+        );
+        const quotaCall = calls.find((call) => call.url.endsWith("/v1internal:retrieveUserQuotaSummary"));
+        assert.ok(quotaCall);
+        assert.equal(new Headers(quotaCall.init.headers).get("authorization"), "Bearer cli-quota-token");
+        assert.deepEqual(JSON.parse(quotaCall.init.body), { project: "quota-project" });
+      });
+    } finally {
+      if (previousLog === undefined) {
+        delete process.env.CCR_ANTIGRAVITY_LANGUAGE_SERVER_LOG;
+      } else {
+        process.env.CCR_ANTIGRAVITY_LANGUAGE_SERVER_LOG = previousLog;
+      }
+    }
   });
 });

@@ -120,6 +120,25 @@ export async function loadAntigravityProject(accessToken: string): Promise<strin
   return project;
 }
 
+// Mesmo payload que o language server do app devolve em RetrieveUserQuotaSummary,
+// mas direto da nuvem: funciona sem o app aberto (ex.: CCR no WSL com o agy CLI).
+export async function fetchAntigravityCloudQuotaSummary(): Promise<Record<string, unknown>> {
+  const auth = await resolveAntigravityAuth();
+  if (!auth?.accessToken || antigravityAccessTokenExpired(auth)) {
+    throw new Error("Antigravity login was not found or its access token expired. Run agy to refresh it.");
+  }
+  const project = await loadAntigravityProject(auth.accessToken);
+  const payload = await postAntigravityInternal(
+    "retrieveUserQuotaSummary",
+    auth.accessToken,
+    project ? { project } : {}
+  );
+  if (!payload) {
+    throw new Error("Antigravity cloud quota request failed.");
+  }
+  return payload;
+}
+
 export async function fetchAntigravityModels(
   accessToken: string
 ): Promise<Array<{ id: string; displayName?: string }>> {

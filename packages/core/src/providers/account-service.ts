@@ -17,6 +17,7 @@ import {
   readZcodeLocalProviderCredential,
   zcodeDefaultBaseUrl
 } from "@ccr/core/agents/local-providers/service";
+import { fetchAntigravityCloudQuotaSummary } from "@ccr/core/agents/local-providers/antigravity";
 import { grokAccessTokenExpired } from "@ccr/core/agents/local-providers/grok";
 import { pluginService } from "@ccr/core/plugins/service";
 import {
@@ -187,7 +188,7 @@ export async function testProviderAccountConnector(request: ProviderAccountTestR
   const payload = connector.type === "webcontent-json"
     ? await fetchWebContentJson(provider, connector)
     : isAntigravityLanguageServerConnector(connector)
-      ? await fetchAntigravityQuotaSummary()
+      ? await fetchAntigravityQuotaSummaryWithCloudFallback()
       : await fetchJson(connector.endpoint, provider, connector.auth, connector.headers, connector.method, connector.body);
   const source = connector.type;
   if (connector.parser === "grok-subscription") {
@@ -710,6 +711,20 @@ async function resolveStandardConnector(
   return connectorError("standard", lastError || "No standard account endpoint returned a usable snapshot.", connectorId(connector));
 }
 
+// The local language server only exists while the Antigravity app runs on this
+// machine; fall back to the same summary from the cloud API with the login token.
+async function fetchAntigravityQuotaSummaryWithCloudFallback(): Promise<unknown> {
+  try {
+    return await fetchAntigravityQuotaSummary();
+  } catch (localError) {
+    try {
+      return await fetchAntigravityCloudQuotaSummary();
+    } catch (cloudError) {
+      throw new Error(`${formatError(localError)} ${formatError(cloudError)}`);
+    }
+  }
+}
+
 function isAntigravityLanguageServerConnector(
   connector: ProviderAccountHttpJsonConnectorConfig | ProviderAccountWebContentJsonConnectorConfig
 ): boolean {
@@ -728,7 +743,7 @@ async function resolveHttpJsonConnector(
     ? await materializeProviderAccountRequest(config, provider)
     : { provider };
   const payload = usesAntigravityLanguageServer
-    ? await fetchAntigravityQuotaSummary()
+    ? await fetchAntigravityQuotaSummaryWithCloudFallback()
     : await fetchJson(connector.endpoint, request.provider, connector.auth, {
         ...(connector.headers ?? {}),
         ...(request.headers ?? {})
