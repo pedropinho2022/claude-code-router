@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   antigravityAccessTokenExpired,
   antigravityCandidate,
+  antigravityCliCredentialFile,
   antigravityCredentialFile,
   antigravityDefaultBaseUrl,
   antigravityIdentityHeaders,
@@ -15,6 +16,7 @@ import {
   loadAntigravityProject,
   normalizeAntigravityProviderAccountConfig,
   readAntigravityAuth,
+  readAntigravityCliAuth,
   resolveAntigravityAuth
 } from "@ccr/core/agents/local-providers/antigravity.ts";
 import {
@@ -66,6 +68,14 @@ async function withAntigravityHome(run) {
 function writeCredentials(home, record) {
   const file = path.join(home, ".gemini", "oauth_creds.json");
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  return file;
+}
+
+function writeCliToken(home, record) {
+  const dir = path.join(home, ".gemini", "antigravity-cli");
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "antigravity-oauth-token");
+  writeFileSync(file, JSON.stringify(record), { encoding: "utf8", mode: 0o600 });
   return file;
 }
 
@@ -486,5 +496,70 @@ test("Antigravity credential file honours the explicit environment override", as
       delete process.env.CCR_ANTIGRAVITY_OAUTH_FILE;
     }
     assert.equal(antigravityCredentialFile(), path.join(home, ".gemini", "oauth_creds.json"));
+  });
+});
+
+test("Antigravity CLI token file is read in nested and flat formats without a refresh token", async () => {
+  await withAntigravityHome(async (home) => {
+    assert.equal(readAntigravityCliAuth(), undefined);
+    const expiry = new Date(futureExpiryMs).toISOString();
+    const file = writeCliToken(home, {
+      token: { access_token: "agy-nested-token", expiry, refresh_token: "agy-refresh", token_type: "Bearer" }
+    });
+    assert.equal(antigravityCliCredentialFile(), file);
+    assert.deepEqual(readAntigravityCliAuth(), {
+      accessToken: "agy-nested-token",
+      expiryDate: futureExpiryMs,
+      sourceFile: file
+    });
+
+    writeCliToken(home, { access_token: "agy-flat-token", expiry_date: futureExpiryMs });
+    assert.equal(readAntigravityCliAuth()?.accessToken, "agy-flat-token");
+    assert.equal(readAntigravityCliAuth()?.expiryDate, futureExpiryMs);
+  });
+});
+
+test("Antigravity resolve and candidate fall back to the CLI token file", async () => {
+  await withAntigravityHome(async (home) => {
+    const file = writeCliToken(home, {
+      token: { access_token: "agy-live-token", expiry: new Date(futureExpiryMs).toISOString() }
+    });
+    await withStubbedFetch(() => {
+      throw new Error("resolve must not touch the network for a live CLI token");
+    }, async () => {
+      const auth = await resolveAntigravityAuth();
+      assert.equal(auth?.accessToken, "agy-live-token");
+      assert.equal(auth?.sourceFile, file);
+    });
+    const candidate = antigravityCandidate();
+    assert.equal(candidate.status, "available");
+    assert.equal(candidate.importable, true);
+    assert.equal(candidate.sourceFile, file);
+  });
+});
+
+test("Antigravity CLI token expiry locks the candidate without rewriting the CLI file", async () => {
+  await withAntigravityHome(async (home) => {
+    const record = {
+      token: { access_token: "agy-old-token", expiry: new Date(pastExpiryMs).toISOString(), refresh_token: "agy-refresh" }
+    };
+    const file = writeCliToken(home, record);
+    await withStubbedFetch(() => {
+      throw new Error("the CLI refresh token must not be sent to the token endpoint");
+    }, async () => {
+      assert.equal(await resolveAntigravityAuth(), undefined);
+    });
+    const candidate = antigravityCandidate();
+    assert.equal(candidate.status, "locked");
+    assert.match(candidate.detail, /Run agy/);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), record);
+  });
+});
+
+test("Antigravity prefers a live oauth_creds.json token over the CLI token file", async () => {
+  await withAntigravityHome(async (home) => {
+    writeCliToken(home, { token: { access_token: "agy-token", expiry: new Date(futureExpiryMs).toISOString() } });
+    writeCredentials(home, { access_token: "gemini-file-token", expiry_date: futureExpiryMs });
+    assert.equal((await resolveAntigravityAuth())?.accessToken, "gemini-file-token");
   });
 });

@@ -139,7 +139,7 @@ export async function fetchAntigravityModels(
 }
 
 export function antigravityCandidate(): LocalAgentProviderCandidate {
-  const auth = readAntigravityAuth();
+  const auth = liveAntigravityAuth();
   if (!auth?.accessToken) {
     return missingCandidate(
       "antigravity",
@@ -151,7 +151,9 @@ export function antigravityCandidate(): LocalAgentProviderCandidate {
   }
   if (antigravityAccessTokenExpired(auth)) {
     return {
-      detail: "Antigravity login was detected, but the access token expired. Sign in to Antigravity again, then rescan.",
+      detail: auth.sourceFile === antigravityCliCredentialFile()
+        ? "Antigravity CLI login was detected, but the access token expired. Run agy to refresh it, then rescan."
+        : "Antigravity login was detected, but the access token expired. Sign in to Antigravity again, then rescan.",
       id: antigravityCandidateId,
       importable: false,
       kind: "antigravity",
@@ -344,6 +346,34 @@ export function readAntigravityAuth(sourceFile?: string): AntigravityTokenSet | 
     idToken: readString(record.id_token) || readString(record.idToken),
     refreshToken: readString(record.refresh_token) || readString(record.refreshToken),
     scope: readString(record.scope),
+    sourceFile: file
+  };
+}
+
+// O Antigravity CLI (agy) grava o token neste arquivo quando o keyring do SO
+// não está disponível (ex.: WSL e containers sem sessão D-Bus).
+export function antigravityCliCredentialFile(): string {
+  const configured = process.env.CCR_ANTIGRAVITY_CLI_TOKEN_FILE?.trim();
+  return configured || path.join(antigravityStorageRoot(), "antigravity-cli", "antigravity-oauth-token");
+}
+
+export function readAntigravityCliAuth(): AntigravityTokenSet | undefined {
+  const file = antigravityCliCredentialFile();
+  const record = readJsonRecord(file);
+  if (!record) {
+    return undefined;
+  }
+  const token = isPlainRecord(record.token) ? record.token : record;
+  const accessToken = readString(token.access_token) || readString(token.accessToken);
+  if (!accessToken) {
+    return undefined;
+  }
+  // Sem refreshToken de propósito: o refresh_token do agy foi emitido para o
+  // client OAuth do próprio CLI, e reescrever o arquivo dele poderia corrompê-lo.
+  // Quem renova o token é o agy, a cada execução.
+  return {
+    accessToken,
+    expiryDate: normalizeKeyringExpiry(token.expiry) ?? normalizeExpiryDate(token.expiry ?? token.expiry_date ?? token.expiryDate),
     sourceFile: file
   };
 }
@@ -548,7 +578,11 @@ function liveAntigravityAuth(sourceFile?: string): AntigravityTokenSet | undefin
   if (fileAuth?.accessToken && !antigravityAccessTokenExpired(fileAuth)) {
     return fileAuth;
   }
-  return readAntigravityKeyringAuth() ?? fileAuth;
+  const cliAuth = readAntigravityCliAuth();
+  if (cliAuth?.accessToken && !antigravityAccessTokenExpired(cliAuth)) {
+    return cliAuth;
+  }
+  return readAntigravityKeyringAuth() ?? fileAuth ?? cliAuth;
 }
 
 function parseRecord(value: string): Record<string, unknown> | undefined {
