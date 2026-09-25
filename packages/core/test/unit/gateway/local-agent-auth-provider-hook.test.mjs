@@ -43,7 +43,7 @@ test("Grok local agent auth hook refreshes live login state before authenticatin
         providerPlugins: [grokOauthProviderPlugin()]
       }
     }).providerHooks;
-    assert.equal(hook.key, "config:ccr-local-agent-grok-cli-api-grok-cli-oauth");
+    assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-grok-cli-api-grok-cli-oauth");
 
     const patch = "*** Begin Patch\n*** Add File: grok.txt\n+hi\n*** End Patch\n";
     const upstreamRequest = {
@@ -123,7 +123,7 @@ test("Claude Code local agent auth hook re-reads the on-disk access token on eve
             providerPlugins: [claudeCodeOauthProviderPlugin()]
           }
         }).providerHooks;
-        assert.equal(hook.key, "config:ccr-local-agent-claude-code-api-claude-code-oauth");
+        assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-claude-code-api-claude-code-oauth");
 
         const upstreamRequest = {
           headers: {
@@ -194,7 +194,7 @@ test("local agent OAuth detector recognizes the Antigravity plugin and exposes i
       providerPlugins: [plugin]
     }
   }).providerHooks;
-  assert.equal(hook.key, "config:ccr-local-agent-x-antigravity-oauth");
+  assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-x-antigravity-oauth");
 });
 
 test("Antigravity local agent auth hook injects the live Bearer token and drops x-api-key", async (t) => {
@@ -304,6 +304,31 @@ test("Antigravity local agent request hook wraps the public Gemini call into v1i
   assert.equal(requestResult.value.body.model, "gemini-3-pro-preview");
   assert.deepEqual(requestResult.value.body.request, { contents: [] });
   assert.match(requestResult.value.headers["user-agent"], /^antigravity\/hub\//);
+});
+
+test("Antigravity local agent request hook keeps alt=sse and wraps the request only once", async () => {
+  const [hook] = createGatewayPlugin({
+    config: {
+      providerPlugins: [antigravityOauthProviderPlugin()]
+    }
+  }).providerHooks;
+
+  const first = await hook.transformRequest({
+    upstreamRequest: {
+      body: { contents: [] },
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      url: "https://daily-cloudcode-pa.googleapis.com/v1beta/models/claude-sonnet-4-6:streamGenerateContent?alt=sse&key=SECRET"
+    }
+  });
+  assert.equal(first.ok, true);
+  assert.equal(first.value.url, "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse");
+
+  const second = await hook.transformRequest({ upstreamRequest: first.value });
+  assert.equal(second.ok, true);
+  assert.equal(second.value.url, first.value.url);
+  assert.deepEqual(second.value.body, first.value.body);
+  assert.deepEqual(second.value.body.request, { contents: [] });
 });
 
 test("Antigravity local agent request hook rewrites anyOf to oneOf in tool schemas for Claude models", async () => {
@@ -462,6 +487,24 @@ test("core gateway config installs the local agent dynamic auth runtime hook whe
 
   assert.ok(localAgentAuthPlugin);
   assert.match(localAgentAuthPlugin.modulePath, /local-agent-auth-provider-hook\.js$/);
+
+  // The runtime hook keeps the full plugin (with its imported token) in its own
+  // config, while the gateway-level copy drops the static auth so it cannot
+  // overwrite the live token the hook resolves.
+  const hookPlugins = localAgentAuthPlugin.config.providerPlugins;
+  assert.equal(hookPlugins.length, 1);
+  assert.equal(hookPlugins[0].auth.headers.authorization, "Bearer imported-stale-token");
+  const providerPlugins = Array.isArray(compiled.providerPlugins) ? compiled.providerPlugins : [];
+  const gatewayCopy = providerPlugins.find((value) => value.key === "ccr-local-agent-grok-cli-api-grok-cli-oauth");
+  assert.ok(gatewayCopy);
+  assert.equal(gatewayCopy.auth, undefined);
+  assert.equal(gatewayCopy.request.headers["x-grok-client-identifier"], "xai-grok-cli");
+
+  const runtime = createGatewayPlugin({ config: compiled, plugin: localAgentAuthPlugin });
+  assert.deepEqual(runtime.providerHooks.map((hook) => hook.key), [
+    "ccr-local-agent-hook:ccr-local-agent-grok-cli-api-grok-cli-oauth"
+  ]);
+  assert.ok(runtime.providerHooks.every((hook) => !hook.key.startsWith("config:")));
 });
 
 test("core gateway config removes Grok unsupported Responses options through declarative request transforms", async (t) => {

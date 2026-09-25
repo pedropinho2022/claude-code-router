@@ -175,7 +175,9 @@ export async function compileCoreGatewayConfig(
     rawTrace: buildRawTraceConfig(config, rawTraceSyncToken, {
       standaloneUsageCapture: options.publicGatewayMode === true
     }),
-    providerPlugins: providerPluginsWithCapabilityAliases,
+    providerPlugins: localAgentAuthProviderHookPlugin
+      ? providerPluginsWithCapabilityAliases.map(withoutLocalAgentOauthStaticAuth)
+      : providerPluginsWithCapabilityAliases,
     providers,
     virtualModelProfiles
   };
@@ -223,10 +225,25 @@ function localAgentAuthProviderHookPluginConfig(providerPlugins: unknown[]): Rec
     return undefined;
   }
   return {
+    config: {
+      providerPlugins: providerPlugins.filter(isLocalAgentOauthProviderPlugin)
+    },
     enabled: true,
     key: localAgentAuthProviderHookPluginKey,
     modulePath: resolveLocalAgentAuthProviderHookEntry()
   };
+}
+
+// The gateway registers module plugins before the config providerPlugins, so
+// every matching config plugin runs after the local agent runtime hook. Its
+// static auth (the token captured at import time) would then overwrite the live
+// token the hook resolved; the hook reads the full plugin from its own config.
+function withoutLocalAgentOauthStaticAuth(plugin: unknown): unknown {
+  if (!isRecord(plugin) || !isLocalAgentOauthProviderPlugin(plugin) || !("auth" in plugin)) {
+    return plugin;
+  }
+  const { auth: _auth, ...rest } = plugin;
+  return rest;
 }
 
 function withProviderCapabilityPluginAliases(

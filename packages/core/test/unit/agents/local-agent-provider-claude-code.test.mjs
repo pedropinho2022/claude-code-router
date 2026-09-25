@@ -89,7 +89,12 @@ test("Core gateway config replaces imported Claude Code OAuth token with live ma
         ];
 
         const compiled = await compileCoreGatewayConfig(config, "raw-trace-token", "billing-usage-token", "core-auth-token");
-        const plugin = compiled.providerPlugins.find((item) => item.key === "ccr-local-agent-claude-code-api-claude-code-oauth");
+        // The live token is carried by the local agent runtime hook; the
+        // gateway-level copy of the plugin has its static auth removed.
+        const gatewayCopy = compiled.providerPlugins.find((item) => item.key === "ccr-local-agent-claude-code-api-claude-code-oauth");
+        assert.equal(gatewayCopy.auth, undefined);
+        const hookPlugin = compiled.plugins.find((item) => item.key === "ccr-local-agent-auth-provider-hooks");
+        const plugin = hookPlugin.config.providerPlugins.find((item) => item.key === "ccr-local-agent-claude-code-api-claude-code-oauth");
 
         assert.equal(plugin.auth.headers.authorization, "Bearer keychain-runtime-token");
         assert.deepEqual(plugin.auth.headers["anthropic-beta"], {

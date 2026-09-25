@@ -6,7 +6,10 @@ import { claudeCodeOauthBetaHeader, claudeCodeOauthRequiredBeta } from "@ccr/cor
 import { isRecord, stringValue } from "@ccr/core/gateway/internal/value";
 import { mergeAnthropicBetaValues } from "@ccr/core/providers/oauth-plugin";
 
-const configProviderPluginKeyPrefix = "config:";
+// Must not reuse the gateway's "config:" prefix: the gateway registers config
+// providerPlugins under "config:<key>" after module plugins, which would
+// silently replace these runtime hooks.
+const localAgentHookKeyPrefix = "ccr-local-agent-hook:";
 const localAgentProviderPluginKeyPrefix = "ccr-local-agent-";
 
 type HeaderRecord = Record<string, string>;
@@ -59,9 +62,12 @@ type ProviderPayloadHookResult = {
 
 type LocalAgentOauthKind = "antigravity" | "claude-code" | "grok" | "kimi";
 
-export function createGatewayPlugin(input: { config?: Record<string, unknown> } = {}) {
+export function createGatewayPlugin(input: { config?: Record<string, unknown>; plugin?: { config?: unknown } } = {}) {
+  const pluginConfig = isRecord(input.plugin?.config) && Array.isArray(input.plugin.config.providerPlugins)
+    ? input.plugin.config
+    : undefined;
   return {
-    providerHooks: localAgentOauthProviderHooks(input.config)
+    providerHooks: localAgentOauthProviderHooks(pluginConfig ?? input.config)
   };
 }
 
@@ -90,7 +96,7 @@ function localAgentOauthProviderHook(plugin: unknown): ProviderHook | undefined 
   }
 
   const hook: ProviderHook = {
-    key: `${configProviderPluginKeyPrefix}${key}`,
+    key: `${localAgentHookKeyPrefix}${key}`,
     provider: stringValue(plugin.provider),
     providerName: stringValue(plugin.providerName)
   };
@@ -241,6 +247,11 @@ function transformWithHeaders(input: ProviderPluginInput, headers: HeaderRecord)
 
 async function transformAntigravityRequest(input: ProviderPluginInput, plugin: Record<string, unknown>): Promise<ProviderHookResult> {
   const url = new URL(input.upstreamRequest.url);
+  // Both imported Antigravity plugins (display name and internal name) can
+  // match the same upstream call; the request must be wrapped only once.
+  if (url.pathname.startsWith("/v1internal:")) {
+    return { ok: true, value: input.upstreamRequest };
+  }
   const [pathModel, action = "generateContent"] = decodeURIComponent(url.pathname.split("/models/")[1] ?? "").split(":");
   const model = input.model || pathModel;
   const project = await resolveAntigravityProject(plugin);
@@ -262,9 +273,18 @@ async function transformAntigravityRequest(input: ProviderPluginInput, plugin: R
         ...antigravityIdentityHeaders()
       },
       method: "POST",
-      url: `${url.origin}/v1internal:${action}`
+      url: `${url.origin}/v1internal:${action}${antigravityQuery(url)}`
     }
   };
+}
+
+// Keeps alt=sse for streamGenerateContent; drops the placeholder API key,
+// which v1internal authenticates with the Bearer token instead.
+function antigravityQuery(url: URL): string {
+  const params = new URLSearchParams(url.search);
+  params.delete("key");
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 async function resolveAntigravityProject(plugin: Record<string, unknown>): Promise<string | undefined> {
