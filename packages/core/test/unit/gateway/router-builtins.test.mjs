@@ -3069,3 +3069,43 @@ test("built-in Claude Code subagent route ignores tags outside the first two mes
   assert.match(result.body.messages[2].content, /Provider\/claude-opus/);
   assert.equal(result.decision.reason, "builtin:claude-code");
 });
+
+test("built-in Claude Code subagents keep the configured model the client requested", async () => {
+  const plugin = createRouterPlugin({ profileModel: "Provider/claude-opus" });
+  const route = (model, system = claudeCodeBillingSystem()) => plugin.routeRequest({
+    body: { messages: [], model, system },
+    headers: { "user-agent": "claude-cli/2.1.207 (external, cli)" },
+    method: "POST",
+    url: "/v1/messages"
+  });
+
+  const sonnet = await route("Provider/claude-sonnet");
+  const sameAsProfile = await route("Provider/claude-opus");
+  const unconfigured = await route("Other/unknown-model");
+  const parent = await route("Provider/claude-sonnet", claudeCodeBillingSystem(false));
+
+  assert.equal(sonnet.body.model, "Provider/claude-sonnet");
+  assert.equal(sonnet.decision.reason, "default");
+  assert.equal(sameAsProfile.body.model, "Provider/claude-opus");
+  assert.equal(sameAsProfile.decision.reason, "builtin:claude-code");
+  assert.equal(unconfigured.body.model, "Provider/claude-opus");
+  assert.equal(unconfigured.decision.reason, "builtin:claude-code");
+  assert.equal(parent.body.model, "Provider/claude-sonnet");
+});
+
+test("built-in Claude Code subagent model tag still overrides the requested client model", async () => {
+  const plugin = createRouterPlugin({ profileModel: "Provider/claude-opus" });
+  const result = await plugin.routeRequest({
+    body: {
+      messages: [{ content: "<CCR-SUBAGENT-MODEL>Provider/claude-haiku</CCR-SUBAGENT-MODEL>\nFind the file.", role: "user" }],
+      model: "Provider/claude-sonnet",
+      system: claudeCodeBillingSystem()
+    },
+    headers: { "user-agent": "claude-cli/2.1.207 (external, cli)" },
+    method: "POST",
+    url: "/v1/messages"
+  });
+
+  assert.equal(result.body.model, "Provider/claude-haiku");
+  assert.equal(result.decision.reason, "builtin:claude-code-subagent");
+});

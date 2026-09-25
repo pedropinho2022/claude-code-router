@@ -583,15 +583,22 @@ function explicitClientModelCanOverrideBuiltInClaudeCodeRoute(
   if (!builtInAgentRouteMatches(request, config, "claude-code")) {
     return true;
   }
-  if (request.builtInClaudeCodeSubagent === true) {
-    return false;
-  }
   const profile = resolveAuthenticatedProfile(request, config, "claude-code");
   const configuredSubagentModel = resolveConfiguredClaudeCodeModel(
     profile?.env?.[claudeCodeSubagentModelEnv],
     config,
     modelRegistry
   );
+  if (request.builtInClaudeCodeSubagent === true) {
+    // Subagents keep the model Claude Code asked for (e.g. `model: "sonnet"`)
+    // unless the profile pins every subagent through CLAUDE_CODE_SUBAGENT_MODEL.
+    if (configuredSubagentModel || !explicitModel) {
+      return false;
+    }
+    const profileModel = resolveBuiltInClaudeCodeRouteTarget(request, config, modelRegistry);
+    return !profileModel ||
+      profileModel.canonicalSelector.toLowerCase() !== explicitModel.canonicalSelector.toLowerCase();
+  }
   return !configuredSubagentModel || !explicitModel ||
     configuredSubagentModel.canonicalSelector.toLowerCase() !== explicitModel.canonicalSelector.toLowerCase();
 }
