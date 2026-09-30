@@ -583,6 +583,15 @@ function withCodexOauthRuntimeDefaults(providerPlugins: unknown[]): unknown[] {
 }
 
 
+// Imported local-agent plugins keep the token captured at import time; swap in
+// the current login (Claude Code, Grok, Kimi) for anything that calls upstream
+// with these plugins outside the gateway runtime hooks, e.g. provider probes.
+export async function withLiveLocalAgentOauthProviderPlugins(providerPlugins: unknown[]): Promise<unknown[]> {
+  return await withKimiOauthRuntimeDefaults(
+    await withGrokOauthRuntimeDefaults(withClaudeCodeOauthRuntimeDefaults(providerPlugins))
+  );
+}
+
 function withClaudeCodeOauthRuntimeDefaults(providerPlugins: unknown[]): unknown[] {
   if (!providerPlugins.some(isLocalClaudeCodeOauthProviderPlugin)) {
     return providerPlugins;

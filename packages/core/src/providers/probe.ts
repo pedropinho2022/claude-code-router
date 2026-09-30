@@ -16,6 +16,7 @@ import { codexDefaultBaseUrl, readCodexAuth } from "@ccr/core/agents/local-provi
 import { opencodeCatalogProtocolModelMap } from "@ccr/core/agents/local-providers/opencode";
 import { antigravityDefaultBaseUrl, antigravityIdentityHeaders, loadAntigravityProject, resolveAntigravityAuth } from "@ccr/core/agents/local-providers/service";
 import { localAgentProviderApiKey } from "@ccr/core/agents/local-providers/shared";
+import { withLiveLocalAgentOauthProviderPlugins } from "@ccr/core/gateway/core-runtime/config-compiler";
 import { findProviderPresetByBaseUrl, providerApiKeySafetyIssue } from "@ccr/core/providers/presets/index";
 import { getProviderCatalogModels } from "@ccr/core/providers/model-catalog";
 import { fetchWithSystemProxy } from "@ccr/core/proxy/system-proxy-fetch";
@@ -114,7 +115,10 @@ type CodexProbeOauthRefreshResult = {
   refreshToken?: string;
 };
 
-export async function probeGatewayProvider(request: GatewayProviderProbeRequest): Promise<GatewayProviderProbeResult> {
+export async function probeGatewayProvider(input: GatewayProviderProbeRequest): Promise<GatewayProviderProbeResult> {
+  const request: GatewayProviderProbeRequest = input.providerPlugins?.length
+    ? { ...input, providerPlugins: await withLiveLocalAgentOauthProviderPlugins(input.providerPlugins) }
+    : input;
   pruneProbeCache();
   const cacheKey = providerProbeCacheKey(request);
   const cached = probeCache.get(cacheKey);
