@@ -24,6 +24,13 @@ import {
   antigravityLanguageServerQuotaEndpoint,
   fetchAntigravityQuotaSummary
 } from "@ccr/core/providers/antigravity-account";
+import {
+  claudeUsagePayloadFromRateLimit,
+  latestClaudeRateLimitSnapshot,
+  parseClaudeRateLimitHeaders,
+  recordClaudeRateLimitSnapshot,
+  type ClaudeRateLimitSnapshot
+} from "@ccr/core/providers/claude-rate-limit";
 import { getUsageTotalsSince } from "@ccr/core/usage/store";
 import { findProviderPresetByBaseUrl, providerEndpointCanReceiveProviderApiKey } from "@ccr/core/providers/presets/index";
 import { fetchWithSystemProxy } from "@ccr/core/proxy/system-proxy-fetch";
@@ -114,6 +121,9 @@ const minRefreshIntervalMs = 30 * 1000;
 const maxErrorRefreshIntervalMs = 60 * 1000;
 const maxStaleAccountSnapshotMs = 2 * 60 * 1000;
 const maxCacheEntries = 500;
+// Quota seen on a real response is preferred over a probe while it is this fresh.
+const claudeObservedRateLimitMaxAgeMs = 10 * 60 * 1000;
+const claudeRateLimitProbeDefaultModel = "claude-haiku-4-5";
 const standardAccountPaths = ["/.well-known/ccr/account", "/v1/account/limits"];
 const codexRateLimitResetCreditConsumeEndpoint = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
 const codexOauthTokenEndpoint = "https://auth.openai.com/oauth/token";
@@ -189,7 +199,7 @@ export async function testProviderAccountConnector(request: ProviderAccountTestR
     ? await fetchWebContentJson(provider, connector)
     : isAntigravityLanguageServerConnector(connector)
       ? await fetchAntigravityQuotaSummaryWithCloudFallback()
-      : await fetchJson(connector.endpoint, provider, connector.auth, connector.headers, connector.method, connector.body);
+      : await fetchClaudeUsageWithRateLimitFallback(connector.endpoint, provider, connector.auth, connector.headers, connector.method, connector.body, provider.name);
   const source = connector.type;
   if (connector.parser === "grok-subscription") {
     const meters = grokSubscriptionMeters(payload, source);
@@ -744,10 +754,10 @@ async function resolveHttpJsonConnector(
     : { provider };
   const payload = usesAntigravityLanguageServer
     ? await fetchAntigravityQuotaSummaryWithCloudFallback()
-    : await fetchJson(connector.endpoint, request.provider, connector.auth, {
+    : await fetchClaudeUsageWithRateLimitFallback(connector.endpoint, request.provider, connector.auth, {
         ...(connector.headers ?? {}),
         ...(request.headers ?? {})
-      }, connector.method, connector.body);
+      }, connector.method, connector.body, provider.name);
   if (connector.parser === "grok-subscription") {
     return {
       errors: [],
@@ -2211,6 +2221,21 @@ async function fetchJson(
   method: "GET" | "POST" = "GET",
   body?: unknown
 ): Promise<unknown> {
+  const response = await fetchWithSystemProxy(endpoint, {
+    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+    headers: accountRequestHeaders(endpoint, provider, auth, headers, method),
+    method
+  });
+  return await readJsonResponse(response);
+}
+
+function accountRequestHeaders(
+  endpoint: string,
+  provider: GatewayProviderConfig,
+  auth: ProviderAccountAuthMode,
+  headers: Record<string, string> | undefined,
+  method: "GET" | "POST"
+): Record<string, string> {
   const apiKey = providerApiKey(provider);
   const requestHeaders: Record<string, string> = {
     accept: "application/json",
@@ -2231,13 +2256,82 @@ async function fetchJson(
   if (method === "POST") {
     requestHeaders["content-type"] = requestHeaders["content-type"] ?? "application/json";
   }
+  return requestHeaders;
+}
 
+// Tokens without the `user:profile` scope (the long-lived `claude setup-token`)
+// get 403 from /api/oauth/usage. Fall back to the quota carried by inference
+// response headers: first the latest one seen by the gateway, then a 1-token probe.
+async function fetchClaudeUsageWithRateLimitFallback(
+  endpoint: string,
+  provider: GatewayProviderConfig,
+  auth: ProviderAccountAuthMode | undefined,
+  headers: Record<string, string> | undefined,
+  method: "GET" | "POST" | undefined,
+  body: unknown,
+  providerName: string
+): Promise<unknown> {
+  try {
+    return await fetchJson(endpoint, provider, auth, headers, method, body);
+  } catch (error) {
+    if (!isClaudeOauthUsageEndpoint(endpoint) || !isMissingProfileScopeError(error)) {
+      throw error;
+    }
+    const observed = latestClaudeRateLimitSnapshot(providerName, claudeObservedRateLimitMaxAgeMs);
+    if (observed) {
+      return claudeUsagePayloadFromRateLimit(observed);
+    }
+    const probed = await probeClaudeRateLimit(endpoint, provider, auth ?? "provider-api-key", headers);
+    recordClaudeRateLimitSnapshot(providerName, probed);
+    return claudeUsagePayloadFromRateLimit(probed);
+  }
+}
+
+async function probeClaudeRateLimit(
+  usageEndpoint: string,
+  provider: GatewayProviderConfig,
+  auth: ProviderAccountAuthMode,
+  headers: Record<string, string> | undefined
+): Promise<ClaudeRateLimitSnapshot> {
+  const endpoint = new URL("/v1/messages", usageEndpoint).toString();
   const response = await fetchWithSystemProxy(endpoint, {
-    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
-    headers: requestHeaders,
-    method
+    body: JSON.stringify({
+      max_tokens: 1,
+      messages: [{ content: "hi", role: "user" }],
+      model: claudeRateLimitProbeModel(provider),
+      system: "You are Claude Code, Anthropic's official CLI for Claude."
+    }),
+    headers: {
+      ...accountRequestHeaders(endpoint, provider, auth, headers, "POST"),
+      "anthropic-version": "2023-06-01"
+    },
+    method: "POST"
   });
-  return await readJsonResponse(response);
+  const snapshot = parseClaudeRateLimitHeaders(response.headers);
+  await response.body?.cancel().catch(() => undefined);
+  if (!snapshot) {
+    throw new Error(`Claude quota probe returned HTTP ${response.status} without rate limit headers.`);
+  }
+  return snapshot;
+}
+
+function claudeRateLimitProbeModel(provider: GatewayProviderConfig): string {
+  const models = Array.isArray(provider.models) ? provider.models : [];
+  return models.find((model) => /haiku/i.test(model)) ?? claudeRateLimitProbeDefaultModel;
+}
+
+function isClaudeOauthUsageEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return url.hostname === "api.anthropic.com" && url.pathname === "/api/oauth/usage";
+  } catch {
+    return false;
+  }
+}
+
+function isMissingProfileScopeError(error: unknown): boolean {
+  const message = formatError(error);
+  return /HTTP 403/.test(message) && /user:profile/.test(message);
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {

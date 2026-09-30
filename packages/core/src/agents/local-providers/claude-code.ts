@@ -165,7 +165,7 @@ export function importClaudeCodeProvider(candidate: LocalAgentProviderCandidate,
   };
 }
 
-function claudeCodeProviderAccountConfig(): ProviderAccountConfig {
+export function claudeCodeProviderAccountConfig(): ProviderAccountConfig {
   return {
     connectors: [
       {

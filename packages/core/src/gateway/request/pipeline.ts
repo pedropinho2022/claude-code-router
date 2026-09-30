@@ -28,6 +28,7 @@ import {
 import { isCodexResponsesCompactPath, type ContextArchiveResponseMode } from "@ccr/core/gateway/context-archive/protocol";
 import { adaptRouteRequestBody, restoreRouteRequestBody } from "@ccr/core/routing/protocol-adapter";
 import { reserveApiKeyLimits } from "@ccr/core/gateway/auth/api-key-authorizer";
+import { recordClaudeRateLimitHeaders } from "@ccr/core/providers/claude-rate-limit";
 import { recordProviderCredentialOutcome } from "@ccr/core/providers/credential-pool";
 import { codexApplyPatchBridgeResponseStream, prepareCodexApplyPatchBridgeRequest } from "@ccr/core/gateway/features/codex-patch-bridge";
 import { codexMultiAgentBridgeResponseStream, prepareCodexMultiAgentBridgeRequest } from "@ccr/core/gateway/features/codex-multi-agent-bridge";
@@ -852,6 +853,7 @@ export class GatewayRequestPipeline {
         this.config
       );
       pluginResponseHeaders.forEach((value, name) => responseHeaders.set(name, value));
+      recordClaudeRateLimitHeaders(responseHeaders, () => resolveProviderLogName(responseHeaders, this.config, routedModel));
       const upstreamResponse = upstreamResult.response;
       if (upstreamResponse.ok) {
         finalizeContextArchiveRequest(contextArchiveRecord, {

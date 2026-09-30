@@ -58,9 +58,16 @@ O painel ([KCR-020](KCR-020-painel-de-status-dos-logins.md)) calcula o venciment
 
 ---
 
+## Resultados já confirmados
+
+- A inferência funciona com o token do `setup-token`: o Opus 5.5 respondeu via "Claude Code API", com HTTP 200.
+- O endpoint de uso `/api/oauth/usage` responde **403 "OAuth token does not meet scope requirement user:profile"**. Isso era esperado: o token só tem escopo de inferência.
+- Toda resposta de inferência traz a quota nos cabeçalhos `anthropic-ratelimit-unified-{5h,7d}-{utilization,reset}` e `-status`. O CCR passou a usar esses cabeçalhos: o gateway guarda a quota vista nas respostas reais e, sem dado recente (até 10 min), o card faz uma consulta de 1 token (`packages/core/src/providers/claude-rate-limit.ts`).
+
 ## Critérios de Aceite
 
-- [ ] Com o token do `setup-token` no Secret, uma requisição `POST /v1/messages` para `Claude Code API/claude-sonnet-5` retorna 200.
+- [x] Com o token do `setup-token`, uma requisição `POST /v1/messages` pelo provider "Claude Code API" retorna 200 (confirmado no WSL).
+- [ ] O card de quota do Claude mostra 5h/7d mesmo com o 403 de `user:profile`.
 - [ ] Uma sessão real do Claude Code (conversa + ferramenta + subagente) funciona inteira pelo pod.
 - [ ] Gerar o token **não** derruba o CCR do WSL enquanto ele ainda estiver em uso (conferido antes do cutover da KCR-004).
 - [ ] O runbook de rotação está documentado e foi testado uma vez.
@@ -75,5 +82,4 @@ O painel ([KCR-020](KCR-020-painel-de-status-dos-logins.md)) calcula o venciment
 
 ## Perguntas em Aberto
 
-- O card de quota do Claude (5h / 7d, em **Account Balance**) funciona com esse token? Ele tem escopo só de inferência, e a consulta de uso pode exigir `user:profile`. Se não funcionar, o painel mostra só o vencimento do token.
 - O `claude setup-token` revoga o login interativo existente? Pela natureza do token, a expectativa é que não, mas é preciso confirmar (primeiro critério de aceite acima).

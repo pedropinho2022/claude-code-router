@@ -37,7 +37,8 @@ A quota do Antigravity (5h/semanal) já vem da nuvem via `retrieveUserQuotaSumma
 - `GET /status.json`: o mesmo conteúdo, para alertas e integrações:
 ```json
 {
-  "claude":      { "state": "ok|warn|expired", "expires_at": "2027-09-29T00:00:00Z", "days_left": 364 },
+  "claude":      { "state": "ok|warn|expired", "expires_at": "2027-09-29T00:00:00Z", "days_left": 364,
+                   "quota": { "5h": 0.0, "7d": 0.32, "7d_reset": "2026-10-02T17:00:00Z" } },
   "antigravity": { "state": "ok|warn|expired|missing", "expires_at": "...", "minutes_left": 42,
                    "last_refresh": { "at": "...", "result": "ok|fail" },
                    "quota": { "gemini_5h": 0.98, "gemini_weekly": 0.99, "3p_5h": 0.0, "3p_weekly": 0.4 } },
@@ -45,6 +46,8 @@ A quota do Antigravity (5h/semanal) já vem da nuvem via `retrieveUserQuotaSumma
 }
 ```
 - `GET /healthz`: 200 enquanto o próprio servidor do painel estiver vivo.
+
+**Quota do Claude:** disponível mesmo com o setup-token (ver [KCR-010](KCR-010-token-de-longa-duração-do-claude.md)). O painel lê os meters `claude_five_hour_quota` e `claude_seven_day_quota` do card de Account Balance do CCR, ou faz o mesmo cálculo a partir dos cabeçalhos `anthropic-ratelimit-unified-*`.
 
 **Regras de estado:**
 - Claude: `warn` com ≤ 30 dias, `expired` com ≤ 0.
@@ -101,4 +104,3 @@ A quota do Antigravity (5h/semanal) já vem da nuvem via `retrieveUserQuotaSumma
 ## Perguntas em Aberto
 
 - Dá pra validar o token do Claude de verdade, sem gastar quota (ex.: `GET https://api.anthropic.com/v1/models` com Bearer + beta OAuth)? Se der, o painel detecta revogação antes do vencimento. Se não, ele confia na data.
-- Vale mostrar também a quota 5h/7d do Claude? Depende da resposta da KCR-010 sobre o escopo do setup-token.
