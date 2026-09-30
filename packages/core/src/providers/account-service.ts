@@ -2260,8 +2260,9 @@ function accountRequestHeaders(
 }
 
 // Tokens without the `user:profile` scope (the long-lived `claude setup-token`)
-// get 403 from /api/oauth/usage. Fall back to the quota carried by inference
-// response headers: first the latest one seen by the gateway, then a 1-token probe.
+// get 403 from /api/oauth/usage, and the endpoint itself is rate limited (429).
+// Fall back to the quota carried by inference response headers: first the
+// latest one seen by the gateway, then a 1-token probe.
 async function fetchClaudeUsageWithRateLimitFallback(
   endpoint: string,
   provider: GatewayProviderConfig,
@@ -2274,7 +2275,7 @@ async function fetchClaudeUsageWithRateLimitFallback(
   try {
     return await fetchJson(endpoint, provider, auth, headers, method, body);
   } catch (error) {
-    if (!isClaudeOauthUsageEndpoint(endpoint) || !isMissingProfileScopeError(error)) {
+    if (!isClaudeOauthUsageEndpoint(endpoint) || !isClaudeUsageFallbackError(error)) {
       throw error;
     }
     const observed = latestClaudeRateLimitSnapshot(providerName, claudeObservedRateLimitMaxAgeMs);
@@ -2329,9 +2330,9 @@ function isClaudeOauthUsageEndpoint(endpoint: string): boolean {
   }
 }
 
-function isMissingProfileScopeError(error: unknown): boolean {
+function isClaudeUsageFallbackError(error: unknown): boolean {
   const message = formatError(error);
-  return /HTTP 403/.test(message) && /user:profile/.test(message);
+  return (/HTTP 403/.test(message) && /user:profile/.test(message)) || /HTTP 429/.test(message);
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {

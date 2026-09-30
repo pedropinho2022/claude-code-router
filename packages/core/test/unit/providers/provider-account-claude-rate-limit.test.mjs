@@ -107,3 +107,18 @@ test("Claude quota keeps other account endpoint errors", async (t) => {
   await assert.rejects(testClaudeConnector(), /HTTP 401/);
   assert.equal(calls.length, 1);
 });
+
+test("Claude quota falls back to response headers when the usage endpoint is rate limited", async (t) => {
+  resetClaudeRateLimitSnapshotsForTest();
+  const calls = stubFetch(t, ({ url }) => url === usageEndpoint
+    ? new Response(JSON.stringify({ error: { message: "Rate limited. Please try again later." } }), {
+        headers: { "content-type": "application/json" },
+        status: 429
+      })
+    : new Response("{}", { headers: rateLimitHeaders(), status: 200 }));
+
+  const result = await testClaudeConnector();
+
+  assert.deepEqual(calls.map((call) => call.url), [usageEndpoint, messagesEndpoint]);
+  assert.equal(result.meters.find((meter) => meter.id === "claude_seven_day_quota")?.used, 32);
+});
