@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo } from "react";
 import { translateErrorMessage } from "@ccr/core/contracts/i18n";
 
-type NavigationId = "onboarding" | "overview" | "observability" | "api-keys" | "server" | "profile" | "networking" | "logs" | "providers" | "models" | "routing" | "virtual-models" | "extensions";
+type NavigationId = "onboarding" | "overview" | "observability" | "api-keys" | "server" | "profile" | "networking" | "logs" | "providers" | "models" | "routing" | "virtual-models" | "playground" | "extensions";
 type ResolvedLanguage = "en" | "zh";
 
 export type AppCopy = {
@@ -118,6 +118,7 @@ export const appCopy: Record<ResolvedLanguage, AppCopy> = {
       profile: "Agent Profiles",
       providers: "Providers",
       models: "Models",
+      playground: "Playground",
       routing: "Global Routing",
       server: "Server",
       "virtual-models": "Fusion"
@@ -750,6 +751,7 @@ export const appCopy: Record<ResolvedLanguage, AppCopy> = {
       profile: "Agent 配置档案",
       providers: "供应商",
       models: "模型",
+      playground: "对话测试",
       routing: "全局路由",
       server: "服务",
       "virtual-models": "Fusion"

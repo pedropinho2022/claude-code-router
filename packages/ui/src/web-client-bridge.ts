@@ -109,6 +109,7 @@ const webClientBridge: CcrApi = {
   applyProfile: () => rpc("applyProfile") as ReturnType<CcrApi["applyProfile"]>,
   cancelBotGatewayQrLogin: (request) => rpc("cancelBotGatewayQrLogin", [request]) as ReturnType<CcrApi["cancelBotGatewayQrLogin"]>,
   checkProviderConnectivity: (request) => rpc("checkProviderConnectivity", [request]) as ReturnType<CcrApi["checkProviderConnectivity"]>,
+  sendPlaygroundChat: (request) => rpc("sendPlaygroundChat", [request]) as ReturnType<CcrApi["sendPlaygroundChat"]>,
   clearProxyNetworkCaptures: () => rpc("clearProxyNetworkCaptures") as ReturnType<CcrApi["clearProxyNetworkCaptures"]>,
   closeBotGatewayQrWindow: (request) => rpc("closeBotGatewayQrWindow", [request]) as ReturnType<CcrApi["closeBotGatewayQrWindow"]>,
   closeTray: () => Promise.resolve(),

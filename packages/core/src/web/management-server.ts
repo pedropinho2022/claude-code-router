@@ -33,6 +33,7 @@ import { getProviderCatalogModels } from "@ccr/core/providers/model-catalog";
 import { getOpenRouterProviderCatalog } from "@ccr/core/providers/openrouter-provider-catalog";
 import { getProviderPresets } from "@ccr/core/providers/presets/index";
 import { checkGatewayProviderConnectivity, probeGatewayProvider, probeGatewayProviderCandidates } from "@ccr/core/providers/probe";
+import { sendPlaygroundChat } from "@ccr/core/playground/chat";
 import { stopProviderModelAutoRefreshService, syncProviderModelAutoRefreshService } from "@ccr/core/providers/model-auto-refresh";
 import { applyProfileConfig } from "@ccr/core/profiles/service";
 import { getProfileOpenCommand, getProfileRuntimeStatus, openProfileFromCcr, stopProfileFromCcr } from "@ccr/core/profiles/launch-service";
@@ -63,6 +64,7 @@ import type {
   GatewayPluginPermission,
   GatewayPluginSurface,
   GatewayProviderConnectivityCheckRequest,
+  PlaygroundChatRequest,
   GatewayProviderProbeCandidatesRequest,
   GatewayProviderProbeRequest,
   GatewayStatus,
@@ -308,6 +310,7 @@ const rpcHandlers: Record<string, RpcHandler> = {
     });
   },
   clearProxyNetworkCaptures: () => proxyService.clearNetworkCaptures(),
+  sendPlaygroundChat: async (request) => sendPlaygroundChat(await loadAppConfig(), request as PlaygroundChatRequest),
   closeBotGatewayQrWindow: (_request) => ({ closed: false }),
   detectProviderIcon: (request) => detectProviderIcon(request as ProviderIconDetectionRequest),
   exportData: () => exportAppData(),

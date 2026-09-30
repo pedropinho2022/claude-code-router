@@ -8,6 +8,7 @@ import {
   KeyRound,
   Layers3,
   Network,
+  MessageSquare,
   Route,
   UserRound,
   type LucideIcon
@@ -72,7 +73,7 @@ import trayCyanIconUrl from "@/assets/tray-cyan.png";
 import trayOrangeIconUrl from "@/assets/tray-orange.png";
 import trayVioletIconUrl from "@/assets/tray-violet.png";
 
-type ViewId = "onboarding" | "overview" | "observability" | "api-keys" | "server" | "profile" | "networking" | "logs" | "providers" | "models" | "routing" | "virtual-models" | "extensions";
+type ViewId = "onboarding" | "overview" | "observability" | "api-keys" | "server" | "profile" | "networking" | "logs" | "providers" | "models" | "routing" | "virtual-models" | "playground" | "extensions";
 type NavigationId = ViewId;
 type OnboardingStepId = "provider" | "profile" | "enter";
 type ProviderAccountDraftMode = "standard" | "http-json" | "browser" | "raw";
@@ -418,6 +419,7 @@ export const navigation: Array<{ icon: LucideIcon; id: NavigationId }> = [
   { icon: UserRound, id: "profile" },
   { icon: Route, id: "routing" },
   { icon: Boxes, id: "virtual-models" },
+  { icon: MessageSquare, id: "playground" },
   { icon: KeyRound, id: "api-keys" },
   { icon: Box, id: "models" },
   { icon: Activity, id: "observability" },

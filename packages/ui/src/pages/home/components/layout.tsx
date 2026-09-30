@@ -14,6 +14,7 @@ import { ExtensionsView } from "./extensions";
 import { LogsView, NetworkingView } from "./network-logs";
 import { OnboardingView } from "./onboarding";
 import { ProfileView } from "./profiles";
+import { PlaygroundView } from "./playground";
 import { ModelsView, ProvidersView } from "./providers";
 import { RoutingView } from "./routing";
 import { VirtualModelsView } from "./virtual-models";
@@ -35,7 +36,7 @@ const sidebarNavigationGroupDefinitions: Array<{
   label: string;
 }> = [
   { id: "workspace", itemIds: ["overview"], label: "Workspace" },
-  { id: "setup", itemIds: ["providers", "profile", "routing"], label: "Setup" },
+  { id: "setup", itemIds: ["providers", "profile", "routing", "playground"], label: "Setup" },
   { id: "monitor", itemIds: ["logs", "observability"], label: "Monitor" },
   { id: "advanced", itemIds: ["virtual-models", "models", "api-keys", "extensions"], label: "Advanced" }
 ];
@@ -61,6 +62,7 @@ type MainViewProps = {
   networking: ComponentProps<typeof NetworkingView>;
   observability: ComponentProps<typeof AgentAnalysisView>;
   overview: ComponentProps<typeof OverviewView>;
+  playground: ComponentProps<typeof PlaygroundView>;
   profile: ComponentProps<typeof ProfileView>;
   providers: ComponentProps<typeof ProvidersView>;
   routing: ComponentProps<typeof RoutingView>;
@@ -458,6 +460,7 @@ function MainViewSwitch({
         {activeView === "models" ? <ModelsView {...viewProps.models} /> : null}
         {activeView === "routing" ? <RoutingView {...viewProps.routing} /> : null}
         {activeView === "virtual-models" ? <VirtualModelsView {...viewProps.virtualModels} /> : null}
+        {activeView === "playground" ? <PlaygroundView {...viewProps.playground} /> : null}
         {activeView === "extensions" ? <ExtensionsView {...viewProps.extensions} /> : null}
       </ViewMotionShell>
     </AnimatePresence>

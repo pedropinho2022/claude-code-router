@@ -33,6 +33,8 @@ import type {
   ClaudeAppGatewayApplyResult,
   GatewayMcpToolInfo,
   GatewayProviderConnectivityCheckReport,
+  PlaygroundChatRequest,
+  PlaygroundChatResult,
   GatewayProviderConnectivityCheckRequest,
   GatewayProviderProbeCandidateResult,
   GatewayProviderProbeCandidatesRequest,
@@ -96,6 +98,7 @@ declare global {
       cancelBotGatewayQrLogin: (request: BotGatewayQrLoginCancelRequest) => Promise<BotGatewayQrLoginCancelResult>;
       captureElementPng?: (request: AppCaptureElementPngRequest) => Promise<AppCaptureElementPngResult>;
       checkProviderConnectivity: (request: GatewayProviderConnectivityCheckRequest) => Promise<GatewayProviderConnectivityCheckReport>;
+      sendPlaygroundChat: (request: PlaygroundChatRequest) => Promise<PlaygroundChatResult>;
       closeBotGatewayQrWindow: (request: BotGatewayQrWindowCloseRequest) => Promise<BotGatewayQrWindowCloseResult>;
       clearProxyNetworkCaptures: () => Promise<ProxyNetworkSnapshot>;
       closeTray: () => Promise<void>;

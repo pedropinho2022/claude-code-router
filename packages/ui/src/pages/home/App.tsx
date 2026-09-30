@@ -3357,6 +3357,10 @@ function App() {
                   }),
                   updateRule: updateRoutingRule
                 },
+                playground: {
+                  providers: draftConfig.Providers,
+                  virtualModelProfiles: draftConfig.virtualModelProfiles ?? []
+                },
                 virtualModels: {
                   addVirtualModel: openAddVirtualModelDialog,
                   editVirtualModel: openEditVirtualModelDialog,

@@ -652,6 +652,30 @@ export type GatewayProviderConnectivityCheckModelResult = {
   supported: boolean;
 };
 
+export type PlaygroundChatMessage = {
+  content: string;
+  role: "assistant" | "user";
+};
+
+export type PlaygroundChatRequest = {
+  maxTokens?: number;
+  messages: PlaygroundChatMessage[];
+  model: string;
+  system?: string;
+};
+
+export type PlaygroundChatResult = {
+  durationMs: number;
+  inputTokens?: number;
+  model?: string;
+  outputTokens?: number;
+  routeReason?: string;
+  routedModel?: string;
+  stopReason?: string;
+  text: string;
+  thinking?: string;
+};
+
 export type GatewayProviderConnectivityCheckRequest = {
   apiKey?: string;
   candidates: GatewayProviderProbeCandidate[];
