@@ -331,7 +331,13 @@ async function resolveConfiguredRouteDecision(
   )
     ? explicitDecision
     : undefined;
-  const ruleBaseDecision = subagentEnvDecision ?? clientModelDecision ?? builtInDecision;
+  const subagentTagDecision = resolveBuiltInClaudeCodeSubagentRouteDecision(
+    request,
+    config,
+    compiled.modelRegistry,
+    defaultFallback
+  );
+  const ruleBaseDecision = subagentTagDecision ?? subagentEnvDecision ?? clientModelDecision ?? builtInDecision;
   const profilePolicies: Array<RoutePolicy<MutableRequestLike, ConfiguredRouteDecision>> = profileRouting
     ? profileRouting.rules.map((rule): RoutePolicy<MutableRequestLike, ConfiguredRouteDecision> => ({
         evaluate: async (context) => {
@@ -365,15 +371,6 @@ async function resolveConfiguredRouteDecision(
         : undefined,
       id: "custom"
     },
-    {
-      evaluate: (context) => resolveBuiltInClaudeCodeSubagentRouteDecision(
-        context,
-        config,
-        compiled.modelRegistry,
-        defaultFallback
-      ),
-      id: "builtin-agent-claude-code-subagent"
-    },
     ...profilePolicies,
     ...compiled.rules.map((rule): RoutePolicy<MutableRequestLike, ConfiguredRouteDecision> => ({
       evaluate: async (context) => {
@@ -392,6 +389,12 @@ async function resolveConfiguredRouteDecision(
       },
       id: `rule:${rule.rule.id}`
     })),
+    // User rules run first: the tag can also match text quoted inside another
+    // request (e.g. the auto-mode classifier's transcript of Agent calls).
+    {
+      evaluate: () => subagentTagDecision,
+      id: "builtin-agent-claude-code-subagent"
+    },
     {
       evaluate: () => subagentEnvDecision,
       id: "builtin-agent-claude-code-subagent-env"

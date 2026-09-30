@@ -3109,3 +3109,68 @@ test("built-in Claude Code subagent model tag still overrides the requested clie
   assert.equal(result.body.model, "Provider/claude-haiku");
   assert.equal(result.decision.reason, "builtin:claude-code-subagent");
 });
+
+test("router rules stay ahead of a Claude Code subagent tag quoted in another request", async () => {
+  const plugin = createRouterPlugin({
+    profileModel: "Provider/claude-sonnet",
+    routerRules: [{
+      condition: {
+        left: "request.body.system",
+        operator: "contains-deep",
+        right: "security monitor for autonomous AI coding agents"
+      },
+      enabled: true,
+      id: "auto-mode-classifier",
+      name: "Auto-mode classifier",
+      rewrites: [{ key: "request.body.model", operation: "set", value: "Provider/claude-opus" }],
+      type: "condition"
+    }]
+  });
+  const result = await plugin.routeRequest({
+    body: {
+      max_tokens: 2112,
+      messages: [{
+        content: [{
+          text: "<transcript>\n{\"assistant\":{\"Agent\":{\"prompt\":\"<CCR-SUBAGENT-MODEL>Provider/claude-haiku</CCR-SUBAGENT-MODEL>\\nFind the file.\"}}}\n</transcript>",
+          type: "text"
+        }],
+        role: "user"
+      }],
+      model: "claude-default",
+      stop_sequences: ["</block>"],
+      system: [{ text: "You are a security monitor for autonomous AI coding agents.", type: "text" }]
+    },
+    headers: { "user-agent": "claude-cli/2.1.283 (external, cli)" },
+    method: "POST",
+    url: "/v1/messages"
+  });
+
+  assert.equal(result.body.model, "Provider/claude-opus");
+  assert.equal(result.decision.reason, "rule:auto-mode-classifier");
+});
+
+test("non-model router rules keep the Claude Code subagent tag model", async () => {
+  const plugin = createRouterPlugin({
+    profileModel: "Provider/claude-sonnet",
+    routerRules: [{
+      condition: { left: "request.url", operator: "contains", right: "/v1" },
+      enabled: true,
+      id: "tag-header",
+      name: "Tag header",
+      rewrites: [{ key: "request.header.x-test-rule", operation: "set", value: "yes" }],
+      type: "condition"
+    }]
+  });
+  const result = await plugin.routeRequest({
+    body: {
+      messages: [{ content: "<CCR-SUBAGENT-MODEL>Provider/claude-haiku</CCR-SUBAGENT-MODEL>\nFind the file.", role: "user" }],
+      model: "claude-default",
+      system: claudeCodeBillingSystem()
+    },
+    headers: { "user-agent": "claude-cli/2.1.283 (external, cli)" },
+    method: "POST",
+    url: "/v1/messages"
+  });
+
+  assert.equal(result.body.model, "Provider/claude-haiku");
+});
