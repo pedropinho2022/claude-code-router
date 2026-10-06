@@ -27,7 +27,7 @@ const gatewayRuntimeStateKey = "gateway";
 // require(), and the IPC round-trip through the parent event loop, so a
 // loaded host legitimately needs well more than the old hardcoded 5s.
 const defaultGatewayConfigAcceptanceTimeoutMs = 30_000;
-const gatewayStartupTimeoutMs = 15_000;
+const defaultGatewayStartupTimeoutMs = 15_000;
 const gatewayChildOutputLimit = 4000;
 const privateDirMode = 0o700;
 const privateFileMode = 0o600;
@@ -112,6 +112,20 @@ export function gatewayConfigAcceptanceTimeoutMs(env: NodeJS.ProcessEnv = proces
     }
   }
   return defaultGatewayConfigAcceptanceTimeoutMs;
+}
+
+// CCR_GATEWAY_STARTUP_TIMEOUT_MS tunes how long the supervisor waits for the
+// core gateway's /health after the config was accepted: slow disks and small
+// CPUs (containers on single-board nodes) can need more than the default.
+export function gatewayStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CCR_GATEWAY_STARTUP_TIMEOUT_MS?.trim();
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 1_000) {
+      return Math.trunc(parsed);
+    }
+  }
+  return defaultGatewayStartupTimeoutMs;
 }
 
 function monitorGatewayConfigAcceptance(child: ChildProcess): {
@@ -517,7 +531,7 @@ function executableExists(candidate: string): boolean {
   return existsSync(candidate);
 }
 
-function captureGatewayChildOutput(child: ChildProcess): void {
+export function captureGatewayChildOutput(child: ChildProcess): void {
   gatewayChildOutput.set(child, { stderr: "", stdout: "" });
   child.stdout?.on("data", (chunk) => appendGatewayOutput(child, "stdout", chunk));
   child.stderr?.on("data", (chunk) => appendGatewayOutput(child, "stderr", chunk));
@@ -886,7 +900,8 @@ export async function waitForManagedCoreGatewayReady(
   runtimeId: string,
   child: ChildProcess
 ): Promise<void> {
-  const deadline = Date.now() + gatewayStartupTimeoutMs;
+  const startupTimeoutMs = gatewayStartupTimeoutMs();
+  const deadline = Date.now() + startupTimeoutMs;
   let lastHealth: CoreGatewayHealth | undefined;
   while (Date.now() < deadline) {
     assertGatewayChildRunning(child);
@@ -907,9 +922,12 @@ export async function waitForManagedCoreGatewayReady(
   const healthDetail = lastHealth
     ? ` Last health response: ${JSON.stringify(lastHealth)}.`
     : "";
-  throw new Error(
-    `Core gateway runtime ${runtimeId} did not become healthy within ${gatewayStartupTimeoutMs}ms.${healthDetail}`
-  );
+  // The child's stdout/stderr is captured for exactly this case: it is the only
+  // place the reason for a gateway that is alive but never listening shows up.
+  throw new Error(appendGatewayChildOutput(
+    child,
+    `Core gateway runtime ${runtimeId} did not become healthy within ${startupTimeoutMs}ms.${healthDetail}`
+  ));
 }
 
 function assertGatewayChildRunning(child: ChildProcess): void {
