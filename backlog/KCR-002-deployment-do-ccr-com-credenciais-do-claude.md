@@ -58,11 +58,13 @@ spec:
           ports: [{ name: http, containerPort: 8080 }]
           env:
             - { name: CCR_PUBLIC_BASE_URL, value: "https://ccr.<dominio-interno>" }
+            - { name: CCR_RAW_TRACE_ENABLED, value: "0" }        # sem captura de corpos completos (ver abaixo)
+            - { name: CCR_GATEWAY_STARTUP_TIMEOUT_MS, value: "60000" }
           envFrom: [{ secretRef: { name: ccr-web } }]
           volumeMounts: [{ name: data, mountPath: /data }]
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits:   { memory: 1Gi }
+            requests: { cpu: 250m, memory: 512Mi }
+            limits:   { memory: 1536Mi }   # sem limite de CPU: throttling derruba probes e a subida do gateway
         - name: console
           image: <registry>/ccr/console:<sha>
           ports:
@@ -115,4 +117,4 @@ spec:
 ## Perguntas em Aberto
 
 - Qual o domínio interno para `CCR_PUBLIC_BASE_URL`? Ele é gravado como `routerEndpoint` na config a cada inicialização.
-- Quais limites de memória fazem sentido? Transcrições de cerca de 600K tokens passam pelo gateway nas chamadas do classificador do auto mode. Medir o consumo na primeira semana.
+- Limites de memória/CPU: **medido na prática.** Com 1Gi de memória e 500m de CPU de limite, o pod foi `OOMKilled` (exit 137) três vezes e as probes estouraram por tempo. Causa principal: o *raw trace* (request logs ligados + `requestLogBodyCapture: "all"`) grava no disco e processa em memória o corpo completo de cada requisição e resposta, e o classificador do auto mode manda transcrições de ~600K tokens a cada ação. O log ficou cheio de `Failed to durably accept raw trace bundle: ENOENT` (diretórios do spool movidos enquanto ainda eram gravados). Mitigação: `CCR_RAW_TRACE_ENABLED=0` (ou `requestLogBodyCapture: "none"`), sem limite de CPU e memória em 1,5Gi. Reavaliar quando os logs voltarem a ser necessários.
