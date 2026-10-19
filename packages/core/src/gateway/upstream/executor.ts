@@ -15,6 +15,7 @@ import { isRecord, stringValue } from "@ccr/core/gateway/internal/value";
 import { isLocalClaudeCodeOauthProviderPlugin, mergeAnthropicBetaValues } from "@ccr/core/providers/oauth-plugin";
 import { abortSignalMessage, formatError, omitLocalObservabilityHeaders, shouldSendBody, withCoreGatewayAuthHeader } from "@ccr/core/gateway/http/io";
 import { parseJsonObjectSafe, releaseJsonObject, serializeJsonBody, serializeJsonBodyWithModel } from "@ccr/core/gateway/http/body";
+import { isInvalidThinkingSignatureError, stripThinkingBlocksFromMessagesBody } from "@ccr/core/gateway/features/thinking-signature-retry";
 import { resolveGatewayPublicModelId } from "@ccr/core/gateway/features/model-discovery";
 import { ccrRoutedModelHeader } from "@ccr/core/gateway/core-runtime/router-plugin-contract";
 import { activeProviderCredentials, findProviderByPublicOrInternalName, findProviderCredentialBySlug, normalizedProviderCapabilities, parseProviderCredentialInternalName, providerCapabilityForClientProtocol, providerCapabilityInternalName, providerCapabilityNameMatches, providerCredentialInternalName, providerCredentialPriority, providerCredentialRuntimeId, providerCredentialSlug, providerProtocolForClientProtocol, sanitizeHeaderValue } from "@ccr/core/providers/runtime-topology";
@@ -489,12 +490,36 @@ export async function fetchUpstreamWithFallback(input: {
     releaseJsonObject(input.body);
 
     try {
-      const response = await fetchWithSystemProxy(attemptUrl, {
+      let response = await fetchWithSystemProxy(attemptUrl, {
         body: shouldSendBody(input.method) ? attempt.body?.toString("utf8") : undefined,
         headers: upstreamHeaders,
         method: input.method,
         signal: input.signal
       });
+
+      if (response.status === 400 && requestProtocolForPath(input.path) === "anthropic_messages") {
+        const strippedBody = stripThinkingBlocksFromMessagesBody(attempt.body);
+        if (strippedBody && isInvalidThinkingSignatureError(response.status, await response.clone().text().catch(() => ""))) {
+          void cancelResponseBody(response);
+          input.trace?.capture({
+            attempt: attemptNumber,
+            kind: "mutation",
+            name: "upstream.thinking-signature-retry",
+            phase: "attempt",
+            target: {
+              ...(attempt.model ? { model: attempt.model } : {}),
+              ...(attemptProvider ? { provider: attemptProvider } : {})
+            }
+          });
+          attempt.body = strippedBody;
+          response = await fetchWithSystemProxy(attemptUrl, {
+            body: shouldSendBody(input.method) ? strippedBody.toString("utf8") : undefined,
+            headers: upstreamHeaders,
+            method: input.method,
+            signal: input.signal
+          });
+        }
+      }
 
       if (hasNextAttempt && shouldFallbackAfterStatus(response.status, fallbackMode)) {
         const delayMs = retryDelayAfterStatus(response.headers, failedAttempts.length);
