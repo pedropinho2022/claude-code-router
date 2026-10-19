@@ -43,7 +43,7 @@ test("Grok local agent auth hook refreshes live login state before authenticatin
         providerPlugins: [grokOauthProviderPlugin()]
       }
     }).providerHooks;
-    assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-grok-cli-api-grok-cli-oauth");
+    assert.equal(hook.key, "module:ccr-live-auth:ccr-local-agent-grok-cli-api-grok-cli-oauth");
 
     const patch = "*** Begin Patch\n*** Add File: grok.txt\n+hi\n*** End Patch\n";
     const upstreamRequest = {
@@ -118,12 +118,14 @@ test("Claude Code local agent auth hook re-reads the on-disk access token on eve
           refreshToken: "stale-refresh-token"
         });
 
-        const [hook] = createGatewayPlugin({
-          config: {
-            providerPlugins: [claudeCodeOauthProviderPlugin()]
-          }
-        }).providerHooks;
-        assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-claude-code-api-claude-code-oauth");
+        const config = createDefaultAppConfig();
+        config.Providers = [{ name: "Claude Code API", id: "claude-code-api", api_base_url: "https://api.anthropic.com", models: ["claude-test"], type: "anthropic_messages" }];
+        config.providerPlugins = [claudeCodeOauthProviderPlugin()];
+        const compiled = await compileCoreGatewayConfig(config, "trace", "billing", "auth");
+        const modulePlugin = compiled.plugins.find((plugin) => plugin.key === "ccr-local-agent-auth-provider-hooks");
+        assert.ok(compiled.providerPlugins.every((plugin) => !plugin.auth));
+        const [hook] = createGatewayPlugin({ config: compiled, plugin: modulePlugin }).providerHooks;
+        assert.equal(hook.key, "module:ccr-live-auth:ccr-local-agent-claude-code-api-claude-code-oauth");
 
         const upstreamRequest = {
           headers: {
@@ -194,7 +196,7 @@ test("local agent OAuth detector recognizes the Antigravity plugin and exposes i
       providerPlugins: [plugin]
     }
   }).providerHooks;
-  assert.equal(hook.key, "ccr-local-agent-hook:ccr-local-agent-x-antigravity-oauth");
+  assert.equal(hook.key, "module:ccr-live-auth:ccr-local-agent-x-antigravity-oauth");
 });
 
 test("Antigravity local agent auth hook injects the live Bearer token and drops x-api-key", async (t) => {
@@ -502,7 +504,7 @@ test("core gateway config installs the local agent dynamic auth runtime hook whe
 
   const runtime = createGatewayPlugin({ config: compiled, plugin: localAgentAuthPlugin });
   assert.deepEqual(runtime.providerHooks.map((hook) => hook.key), [
-    "ccr-local-agent-hook:ccr-local-agent-grok-cli-api-grok-cli-oauth"
+    "module:ccr-live-auth:ccr-local-agent-grok-cli-api-grok-cli-oauth"
   ]);
   assert.ok(runtime.providerHooks.every((hook) => !hook.key.startsWith("config:")));
 });

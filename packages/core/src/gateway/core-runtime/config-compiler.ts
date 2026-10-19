@@ -20,6 +20,7 @@ import { uniqueStrings } from "@ccr/core/gateway/internal/collections";
 import { isLocalClaudeCodeOauthProviderPlugin, mergeAnthropicBetaValues } from "@ccr/core/providers/oauth-plugin";
 import { isLocalAgentOauthProviderPlugin } from "@ccr/core/gateway/core-runtime/local-agent-auth-provider-hook";
 import { ccrRouterPluginKey } from "@ccr/core/gateway/core-runtime/router-plugin-contract";
+import { isOpenCodePublicFreeTierPlugin } from "@ccr/core/agents/local-providers/opencode-freetier";
 import { resolveConfiguredProviderModelSelector, resolveUniqueConfiguredProviderModelSelector } from "@ccr/core/routing/model-resolution";
 
 const upstreamHeaderSanitizerPluginKey = "ccr-upstream-header-sanitizer";
@@ -175,9 +176,7 @@ export async function compileCoreGatewayConfig(
     rawTrace: buildRawTraceConfig(config, rawTraceSyncToken, {
       standaloneUsageCapture: options.publicGatewayMode === true
     }),
-    providerPlugins: localAgentAuthProviderHookPlugin
-      ? providerPluginsWithCapabilityAliases.map(withoutLocalAgentOauthStaticAuth)
-      : providerPluginsWithCapabilityAliases,
+    providerPlugins: providerPluginsWithCapabilityAliases.map(withoutStaticLocalOauthAuth),
     providers,
     virtualModelProfiles
   };
@@ -221,29 +220,30 @@ function coreGatewayStaticAuthKeys(
 }
 
 function localAgentAuthProviderHookPluginConfig(providerPlugins: unknown[]): Record<string, unknown> | undefined {
-  if (!providerPlugins.some(isLocalAgentOauthProviderPlugin)) {
+  if (!providerPlugins.some((plugin) => isLocalAgentOauthProviderPlugin(plugin) || isOpenCodePublicFreeTierPlugin(plugin))) {
     return undefined;
   }
   return {
-    config: {
-      providerPlugins: providerPlugins.filter(isLocalAgentOauthProviderPlugin)
-    },
+    config: { providerPlugins: providerPlugins.filter(isLocalAgentOauthProviderPlugin) },
     enabled: true,
     key: localAgentAuthProviderHookPluginKey,
     modulePath: resolveLocalAgentAuthProviderHookEntry()
   };
 }
 
-// The gateway registers module plugins before the config providerPlugins, so
-// every matching config plugin runs after the local agent runtime hook. Its
-// static auth (the token captured at import time) would then overwrite the live
-// token the hook resolved; the hook reads the full plugin from its own config.
-function withoutLocalAgentOauthStaticAuth(plugin: unknown): unknown {
-  if (!isRecord(plugin) || !isLocalAgentOauthProviderPlugin(plugin) || !("auth" in plugin)) {
-    return plugin;
-  }
+function withoutStaticLocalOauthAuth(plugin: unknown): unknown {
+  if (!isRecord(plugin) || !isLocalAgentOauthProviderPlugin(plugin)) return plugin;
+  // Static plugins run after module hooks. Only the live hook may set OAuth
+  // authentication; its private config retains the import-time fallback.
   const { auth: _auth, ...rest } = plugin;
-  return rest;
+  if (!isRecord(rest.request) || !isRecord(rest.request.headers)) return rest;
+  return {
+    ...rest,
+    request: {
+      ...rest.request,
+      headers: Object.fromEntries(Object.entries(rest.request.headers).filter(([key]) => key.toLowerCase() !== "authorization"))
+    }
+  };
 }
 
 function withProviderCapabilityPluginAliases(
