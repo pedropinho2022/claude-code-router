@@ -577,6 +577,8 @@ export type GatewayProviderDetectedProvider = "new-api";
 export type GatewayProviderProbeRequest = {
   apiKey?: string;
   baseUrl: string;
+  /** The provider's "Extra request headers", sent on model discovery and connectivity checks too. */
+  extraHeaders?: Record<string, string>;
   forceRefresh?: boolean;
   mode?: "connectivity" | "models" | "protocols";
   models?: string[];
@@ -596,6 +598,7 @@ export type GatewayProviderProbeCandidate = {
 export type GatewayProviderProbeCandidatesRequest = {
   apiKey?: string;
   candidates: GatewayProviderProbeCandidate[];
+  extraHeaders?: Record<string, string>;
   forceRefresh?: boolean;
   mode?: "connectivity" | "models" | "protocols";
   models?: string[];
@@ -679,6 +682,7 @@ export type PlaygroundChatResult = {
 export type GatewayProviderConnectivityCheckRequest = {
   apiKey?: string;
   candidates: GatewayProviderProbeCandidate[];
+  extraHeaders?: Record<string, string>;
   forceRefresh?: boolean;
   models: string[];
   providerPlugins?: unknown[];

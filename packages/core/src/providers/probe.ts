@@ -116,9 +116,11 @@ type CodexProbeOauthRefreshResult = {
 };
 
 export async function probeGatewayProvider(input: GatewayProviderProbeRequest): Promise<GatewayProviderProbeResult> {
-  const request: GatewayProviderProbeRequest = input.providerPlugins?.length
-    ? { ...input, providerPlugins: await withLiveLocalAgentOauthProviderPlugins(input.providerPlugins) }
-    : input;
+  const livePlugins = input.providerPlugins?.length
+    ? await withLiveLocalAgentOauthProviderPlugins(input.providerPlugins)
+    : input.providerPlugins;
+  const providerPlugins = withExtraHeadersProviderPlugin(livePlugins ?? [], input.extraHeaders);
+  const request: GatewayProviderProbeRequest = providerPlugins.length > 0 ? { ...input, providerPlugins } : input;
   pruneProbeCache();
   const cacheKey = providerProbeCacheKey(request);
   const cached = probeCache.get(cacheKey);
@@ -173,6 +175,7 @@ export async function probeGatewayProviderCandidates(
         apiKey: request.apiKey,
         baseUrl: candidate.baseUrl,
         forceRefresh: request.forceRefresh,
+        extraHeaders: request.extraHeaders,
         mode,
         models: mode === "connectivity" ? request.models ?? [] : [],
         providerPlugins: request.providerPlugins,
@@ -201,6 +204,7 @@ export async function checkGatewayProviderConnectivity(
           apiKey: request.apiKey,
           candidates: request.candidates,
           forceRefresh: request.forceRefresh,
+          extraHeaders: request.extraHeaders,
           mode: "connectivity",
           models: [model],
           providerPlugins: request.providerPlugins,
@@ -914,6 +918,31 @@ function mediaProbeBody(protocol: GatewayProviderCapabilityProtocol): Record<str
     };
   }
   return {};
+}
+
+// A provider's "Extra request headers" (e.g. Anthropic's `anthropic-workspace-id`,
+// which keys not scoped to a workspace must send on every request) have to reach
+// model discovery and connectivity checks too, or those fail while real requests
+// work. They ride on the same static-auth mechanism the local-agent plugins use;
+// headers a plugin already sets win over them.
+function withExtraHeadersProviderPlugin(providerPlugins: unknown[], extraHeaders: Record<string, string> | undefined): unknown[] {
+  const headers = Object.fromEntries(
+    Object.entries(extraHeaders ?? {}).filter(([name, value]) => name.trim() && typeof value === "string" && value !== "")
+  );
+  if (Object.keys(headers).length === 0) {
+    return providerPlugins;
+  }
+  const authIndex = providerPlugins.findIndex((plugin) => providerPluginAuth(plugin));
+  if (authIndex < 0) {
+    return [...providerPlugins, { auth: { headers } }];
+  }
+  return providerPlugins.map((plugin, index) => {
+    if (index !== authIndex || !isRecord(plugin) || !isRecord(plugin.auth)) {
+      return plugin;
+    }
+    const pluginHeaders = isRecord(plugin.auth.headers) ? plugin.auth.headers : {};
+    return { ...plugin, auth: { ...plugin.auth, headers: { ...headers, ...pluginHeaders } } };
+  });
 }
 
 async function providerProbeAuthRequest(

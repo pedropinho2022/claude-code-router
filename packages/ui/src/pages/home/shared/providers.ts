@@ -1834,11 +1834,17 @@ export function providerProbeCandidatesApiKeySafetyIssue(
   return undefined;
 }
 
-export function providerProbeInputKey(candidates: ProviderProbeCandidate[], apiKey: string, models: string[]): string {
+export function providerProbeInputKey(
+  candidates: ProviderProbeCandidate[],
+  apiKey: string,
+  models: string[],
+  extraHeaders?: Record<string, string>
+): string {
   return JSON.stringify([
     candidates.map((candidate) => [candidate.baseUrl, candidate.protocols]),
     apiKey,
-    models
+    models,
+    extraHeaders ?? {}
   ]);
 }
 
@@ -1847,6 +1853,7 @@ export async function probeProviderCandidates(
   apiKey: string,
   models: string[],
   options: {
+    extraHeaders?: Record<string, string>;
     forceRefresh?: boolean;
     mode?: "connectivity" | "models" | "protocols";
     providerPlugins?: unknown[];
@@ -1857,6 +1864,7 @@ export async function probeProviderCandidates(
   return await window.ccr?.probeProviderCandidates({
     apiKey: apiKey || undefined,
     candidates,
+    extraHeaders: options.extraHeaders,
     forceRefresh: options.forceRefresh,
     mode,
     models: mode === "connectivity" ? models : [],
@@ -2090,6 +2098,22 @@ export function parseProviderExtraJsonDraft(
     return providerExtraJsonShapeMessages[field];
   }
   return parsed;
+}
+
+/**
+ * String-valued entries of the Advanced settings "Extra request headers" box.
+ * Probes send them too, because some upstreams (for example an Anthropic key
+ * that is not scoped to a workspace) reject requests without them.
+ */
+export function providerProbeExtraHeadersFromText(text: string): Record<string, string> | undefined {
+  const parsed = parseProviderExtraJsonDraft(text, "extraHeaders");
+  if (!parsed || typeof parsed === "string") {
+    return undefined;
+  }
+  const headers = Object.fromEntries(
+    Object.entries(parsed).filter(([name, value]) => name.trim() && typeof value === "string" && value !== "")
+  ) as Record<string, string>;
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 export function providerGlobalBaseUrlForProbe(

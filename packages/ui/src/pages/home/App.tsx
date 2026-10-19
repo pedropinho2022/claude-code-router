@@ -20,7 +20,7 @@ import {
   navigation, NavigationId, normalizeApiKeys, normalizeBotGatewaySavedConfigs, normalizeConfig, normalizeLanguagePreference, normalizeObservabilityConfig, normalizeOverviewWidgets, normalizeProxyConfig,
   normalizeProfileItem, normalizeProviderBaseUrl, normalizeRouterFallbackConfig, normalizeThemePreference, normalizeToolHubConfig, normalizeTrayBalanceProgressConfig, normalizeTrayIconPreference,
   normalizeTrayWidgets, normalizeTrayWindowModules, normalizeVirtualModelDraftPatch, OnboardingReadinessOptions, OnboardingStepId, onboardingStepOrder,
-  OverviewWidgetConfig, parseProviderAccountDraft, parseProviderExtraJsonDraft, pluginConfigPatchFromSettingsDraft,
+  OverviewWidgetConfig, parseProviderAccountDraft, parseProviderExtraJsonDraft, pluginConfigPatchFromSettingsDraft, providerProbeExtraHeadersFromText,
   providerCredentialsFromDraft,
   persistLanguagePreference, PluginInstallCandidate, PluginMarketplaceEntry, PluginRoutingConfigTarget, PluginSettingsDraft, presetCapabilitiesFromDraft,
   probeProviderCandidates, probeProviderDeepLinkPayload, profileAgentLabel, profileAgentOptionsForRuntime, profileDraftWithDetectedAppPath, profileEnvRowsForAgent, ProfileConfig, ProfileOpenSurface, ProfileRuntimeStatus, profileConfigFromDraft, providerAccountApiKeySafetyIssue,
@@ -162,7 +162,8 @@ function providerRefreshModelsInputKey(
     providerProbeInputKey(
       providerProbeCandidates(draft).filter(isProviderProbeCandidateReady),
       providerConnectivityApiKeyFromDraft(draft),
-      []
+      [],
+      providerProbeExtraHeadersFromText(draft.extraHeadersText)
     ),
     protocols ?? [],
     draft.protocolDetectionMode,
@@ -1467,7 +1468,8 @@ function App() {
     const shouldDiscoverModels = Boolean(draftProbeApiKey);
     const probeMode = shouldDiscoverModels ? "models" : "protocols";
     const probeApiKey = shouldDiscoverModels ? draftProbeApiKey : "";
-    const inputKey = providerProbeInputKey(candidates, probeApiKey, []);
+    const probeExtraHeaders = providerProbeExtraHeadersFromText(providerDraft.extraHeadersText);
+    const inputKey = providerProbeInputKey(candidates, probeApiKey, [], probeExtraHeaders);
 
     setProviderProbeError("");
     if (candidates.length === 0) {
@@ -1477,7 +1479,7 @@ function App() {
     setProviderProbeLoading(true);
 
     const timer = window.setTimeout(() => {
-      void probeProviderCandidates(candidates, probeApiKey, [], { mode: probeMode })
+      void probeProviderCandidates(candidates, probeApiKey, [], { extraHeaders: probeExtraHeaders, mode: probeMode })
         .then((result) => {
           if (providerProbeRequestId.current !== requestId) {
             return;
@@ -1530,7 +1532,7 @@ function App() {
         setProviderProbeLoading(false);
       }
     };
-  }, [activeView, onboardingStep, providerAddOpen, providerDraft.apiKey, providerDraft.baseUrl, providerDraft.credentialMode, providerDraft.credentials, providerDraft.presetId, providerDraft.protocol, providerDraft.protocolDetectionMode, providerDraft.providerPlugins]);
+  }, [activeView, onboardingStep, providerAddOpen, providerDraft.apiKey, providerDraft.baseUrl, providerDraft.credentialMode, providerDraft.credentials, providerDraft.extraHeadersText, providerDraft.presetId, providerDraft.protocol, providerDraft.protocolDetectionMode, providerDraft.providerPlugins]);
 
   async function refreshProviderModels(): Promise<void> {
     if (providerProbeLoading) {
@@ -1588,6 +1590,7 @@ function App() {
       const apiKey = providerConnectivityApiKeyFromDraft(providerDraft);
       const providerPlugins = providerConnectivityProviderPlugins(providerDraft, draftConfig.providerPlugins, existingProvider);
       const result = await probeProviderCandidates(candidates, apiKey, [], {
+        extraHeaders: providerProbeExtraHeadersFromText(providerDraft.extraHeadersText),
         forceRefresh: true,
         mode: "models",
         providerPlugins,
@@ -1674,6 +1677,7 @@ function App() {
       const report = await window.ccr.checkProviderConnectivity({
         apiKey,
         candidates,
+        extraHeaders: providerProbeExtraHeadersFromText(providerDraft.extraHeadersText),
         forceRefresh: true,
         models,
         providerPlugins,
