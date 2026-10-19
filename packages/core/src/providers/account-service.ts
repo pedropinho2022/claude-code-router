@@ -26,6 +26,10 @@ import {
 } from "@ccr/core/providers/antigravity-account";
 import {
   claudeUsagePayloadFromRateLimit,
+  latestAnthropicApiRateLimitSnapshot,
+  parseAnthropicApiRateLimitHeaders,
+  recordAnthropicApiRateLimitSnapshot,
+  type AnthropicApiRateLimitSnapshot,
   latestClaudeRateLimitSnapshot,
   parseClaudeRateLimitHeaders,
   recordClaudeRateLimitSnapshot,
@@ -279,6 +283,10 @@ function normalizeProviderAccountTestConnector(
     method: connector.method ?? "GET",
     type: "http-json"
   };
+}
+
+export async function standardProviderAccountConnectorForTest(provider: GatewayProviderConfig): Promise<ConnectorResult> {
+  return await resolveStandardConnector({} as AppConfig, provider, { auth: "provider-api-key", type: "standard" });
 }
 
 export function newApiKeyUsageMetersForTest(payload: unknown): ProviderAccountMeter[] {
@@ -691,6 +699,9 @@ async function resolveStandardConnector(
   provider: GatewayProviderConfig,
   connector: ProviderAccountStandardConnectorConfig
 ): Promise<ConnectorResult> {
+  if (isAnthropicApiKeyProvider(provider)) {
+    return await resolveAnthropicApiKeyRateLimits(provider);
+  }
   const endpoints = standardConnectorEndpoints(provider, connector);
   let lastError = "";
 
@@ -2314,6 +2325,75 @@ async function probeClaudeRateLimit(
     throw new Error(`Claude quota probe returned HTTP ${response.status} without rate limit headers.`);
   }
   return snapshot;
+}
+
+// A regular Anthropic API key has no balance endpoint (that needs an Admin key),
+// but every response reports the key's per-minute limits. Prefer what the gateway
+// saw on real traffic, then spend one token on a probe. The provider's extra
+// headers ride along: keys not scoped to a workspace need `anthropic-workspace-id`.
+async function resolveAnthropicApiKeyRateLimits(provider: GatewayProviderConfig): Promise<ConnectorResult> {
+  const observed = latestAnthropicApiRateLimitSnapshot(provider.name, claudeObservedRateLimitMaxAgeMs);
+  const snapshot = observed ?? await probeAnthropicApiRateLimits(provider);
+  recordAnthropicApiRateLimitSnapshot(provider.name, snapshot);
+  return {
+    errors: [],
+    message: "Per-minute rate limits reported by the Anthropic API for this key.",
+    meters: snapshot.windows.map((window): ProviderAccountMeter => ({
+      id: window.id,
+      kind: window.unit,
+      label: window.label,
+      limit: window.limit,
+      remaining: window.remaining,
+      resetAt: window.resetsAt,
+      source: "standard",
+      unit: window.unit,
+      used: window.limit - window.remaining,
+      window: "minute"
+    })),
+    source: "standard"
+  };
+}
+
+async function probeAnthropicApiRateLimits(provider: GatewayProviderConfig): Promise<AnthropicApiRateLimitSnapshot> {
+  const endpoint = new URL("/v1/messages", providerBaseUrl(provider)).toString();
+  const extraHeaders = Object.fromEntries(
+    Object.entries(isRecord(provider.extraHeaders) ? provider.extraHeaders : {})
+      .filter(([name, value]) => name.trim() && typeof value === "string" && value !== "")
+  ) as Record<string, string>;
+  const response = await fetchWithSystemProxy(endpoint, {
+    body: JSON.stringify({
+      max_tokens: 1,
+      messages: [{ content: "hi", role: "user" }],
+      model: claudeRateLimitProbeModel(provider)
+    }),
+    headers: {
+      ...extraHeaders,
+      accept: "application/json",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": providerApiKey(provider)
+    },
+    method: "POST"
+  });
+  const snapshot = parseAnthropicApiRateLimitHeaders(response.headers);
+  const message = snapshot ? "" : await response.text().catch(() => "");
+  await response.body?.cancel().catch(() => undefined);
+  if (!snapshot) {
+    throw new Error(`Anthropic rate limit probe returned HTTP ${response.status} without rate limit headers.${message ? ` ${message.slice(0, 300)}` : ""}`);
+  }
+  return snapshot;
+}
+
+function isAnthropicApiKeyProvider(provider: GatewayProviderConfig): boolean {
+  const apiKey = providerApiKey(provider).trim();
+  if (!/^sk-ant-/i.test(apiKey) || /^sk-ant-oat/i.test(apiKey)) {
+    return false;
+  }
+  try {
+    return new URL(providerBaseUrl(provider)).hostname === "api.anthropic.com";
+  } catch {
+    return false;
+  }
 }
 
 function claudeRateLimitProbeModel(provider: GatewayProviderConfig): string {

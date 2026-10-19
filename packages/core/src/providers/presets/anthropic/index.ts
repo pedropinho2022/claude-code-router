@@ -1,7 +1,7 @@
-import { defaultProviderAccountConfig, type ProviderPreset } from "@ccr/core/providers/presets/types";
+import { standardProviderAccountConfig, type ProviderPreset } from "@ccr/core/providers/presets/types";
 
 export const anthropicProviderPreset: ProviderPreset = {
-  account: defaultProviderAccountConfig,
+  account: standardProviderAccountConfig,
   aliases: ["anthropic", "claude"],
   defaultModels: ["claude-sonnet-4-20250514"],
   endpoints: [

@@ -2343,6 +2343,17 @@ export function AddProviderForm({
                   ) : null}
                 </div>
               )}
+              <Field label={t("Extra request headers")} requirement="optional" requirementLabel={t("Optional")}>
+                <Textarea
+                  className="min-h-[68px] font-mono text-[11px]"
+                  onChange={(event) => onChange({ extraHeadersText: event.target.value })}
+                  placeholder={`{\n  "x-tenant": "acme"\n}`}
+                  value={draft.extraHeadersText}
+                />
+                <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                  {t("Sent with every upstream request for this provider, alongside the API key header.")}
+                </div>
+              </Field>
             </div>
           </>
         ) : null}
@@ -2471,17 +2482,6 @@ export function AddProviderForm({
                       />
                       <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
                         {t("Merged into every upstream request for this provider. Use \"default\" for all models, or a model name as the key to target one.")}
-                      </div>
-                    </Field>
-                    <Field className="sm:col-span-2" label={t("Extra request headers")} requirement="optional" requirementLabel={t("Optional")}>
-                      <Textarea
-                        className="min-h-[68px] font-mono text-[11px]"
-                        onChange={(event) => onChange({ extraHeadersText: event.target.value })}
-                        placeholder={`{\n  "x-tenant": "acme"\n}`}
-                        value={draft.extraHeadersText}
-                      />
-                      <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                        {t("Sent with every upstream request for this provider, alongside the API key header.")}
                       </div>
                     </Field>
                     <AntigravityProjectField
