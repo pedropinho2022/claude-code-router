@@ -1702,6 +1702,14 @@ export function providerAccountConnectorExample(): string {
           unit: "tokens",
           limit: 1000000,
           window: "weekly"
+        },
+        {
+          id: "monthly-usd",
+          label: "Monthly budget",
+          unit: "USD",
+          limit: 200,
+          window: "monthly",
+          block: true
         }
       ]
     }

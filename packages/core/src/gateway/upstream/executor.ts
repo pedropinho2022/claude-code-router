@@ -15,6 +15,7 @@ import { isRecord, stringValue } from "@ccr/core/gateway/internal/value";
 import { isLocalClaudeCodeOauthProviderPlugin, mergeAnthropicBetaValues } from "@ccr/core/providers/oauth-plugin";
 import { abortSignalMessage, formatError, omitLocalObservabilityHeaders, shouldSendBody, withCoreGatewayAuthHeader } from "@ccr/core/gateway/http/io";
 import { parseJsonObjectSafe, releaseJsonObject, serializeJsonBody, serializeJsonBodyWithModel } from "@ccr/core/gateway/http/body";
+import { providerBudgetBlock, providerBudgetBlockMessage, providerBudgetBlockResponse } from "@ccr/core/gateway/limits/provider-budget";
 import { isInvalidThinkingSignatureError, stripThinkingBlocksFromMessagesBody } from "@ccr/core/gateway/features/thinking-signature-retry";
 import { resolveGatewayPublicModelId } from "@ccr/core/gateway/features/model-discovery";
 import { ccrRoutedModelHeader } from "@ccr/core/gateway/core-runtime/router-plugin-contract";
@@ -488,6 +489,44 @@ export async function fetchUpstreamWithFallback(input: {
     releaseJsonObject(attempt.body);
     releaseJsonObject(attemptSourceBody);
     releaseJsonObject(input.body);
+
+    const budgetBlock = await providerBudgetBlock(
+      attemptProvider ? findProviderByPublicOrInternalName(input.config, attemptProvider) : undefined
+    );
+    if (budgetBlock) {
+      input.trace?.capture({
+        attempt: attemptNumber,
+        durationMs: 0,
+        kind: "outcome",
+        name: "upstream.attempt.outcome",
+        outcome: { fallbackReason: "budget_exceeded", statusCode: 402 },
+        phase: "outcome",
+        startedAtMs: attemptStartedAt,
+        status: "error",
+        target: {
+          ...(attempt.model ? { model: attempt.model } : {}),
+          ...(attemptProvider ? { provider: attemptProvider } : {})
+        }
+      });
+      if (hasNextAttempt) {
+        failedAttempts.push({
+          credentialChain: attempt.credentialChain,
+          credentialIds: attempt.credentialIds,
+          error: providerBudgetBlockMessage(budgetBlock),
+          model: attempt.model,
+          statusCode: 402
+        });
+        continue;
+      }
+      return {
+        attempt,
+        failedAttempts,
+        response: providerBudgetBlockResponse(budgetBlock),
+        timing: {
+          attemptStartedAtMonoMs
+        }
+      };
+    }
 
     try {
       let response = await fetchWithSystemProxy(attemptUrl, {

@@ -344,10 +344,12 @@ export type ProviderAccountLocalEstimateConnectorConfig = ProviderAccountConnect
 };
 
 export type ProviderAccountLocalWindowConfig = {
+  /** With unit "USD": reject requests to this provider once the window's estimated spend reaches the limit. */
+  block?: boolean;
   id: string;
   label: string;
   limit: number;
-  unit: "hours" | "tokens" | "requests";
+  unit: "hours" | "tokens" | "requests" | "USD";
   window: ProviderAccountMeterWindow;
 };
 

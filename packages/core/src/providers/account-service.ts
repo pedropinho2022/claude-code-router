@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { loadAppConfig } from "@ccr/core/config/config";
+import { localEstimateResetAt, localEstimateWindowStart } from "@ccr/core/usage/budget-window";
 import { attachCodexRateLimitResetCreditDetails } from "@ccr/core/agents/local-providers/codex";
 import {
   antigravityIdentityHeaders,
@@ -287,6 +288,13 @@ function normalizeProviderAccountTestConnector(
 
 export async function standardProviderAccountConnectorForTest(provider: GatewayProviderConfig): Promise<ConnectorResult> {
   return await resolveStandardConnector({} as AppConfig, provider, { auth: "provider-api-key", type: "standard" });
+}
+
+export async function localEstimateMeterForTest(
+  provider: GatewayProviderConfig,
+  window: ProviderAccountLocalWindowConfig
+): Promise<ProviderAccountMeter | undefined> {
+  return await localEstimateMeter(provider, window, new Date());
 }
 
 export function newApiKeyUsageMetersForTest(payload: unknown): ProviderAccountMeter[] {
@@ -963,15 +971,17 @@ async function localEstimateMeter(
     ...(credentialId ? { credential: credentialId } : {}),
     provider: provider.name
   });
-  const used = window.unit === "tokens"
-    ? totals.totalTokens
-    : window.unit === "requests"
-      ? totals.requestCount
-      : totals.requestCount * totals.avgDurationMs / 3_600_000;
+  const used = window.unit === "USD"
+    ? totals.costUsd
+    : window.unit === "tokens"
+      ? totals.totalTokens
+      : window.unit === "requests"
+        ? totals.requestCount
+        : totals.requestCount * totals.avgDurationMs / 3_600_000;
 
   return {
     id: window.id,
-    kind: window.unit === "tokens" ? "tokens" : window.unit === "requests" ? "requests" : "time_window",
+    kind: window.unit === "USD" ? "quota" : window.unit === "tokens" ? "tokens" : window.unit === "requests" ? "requests" : "time_window",
     label: window.label,
     limit,
     remaining: Math.max(0, limit - used),
@@ -2566,44 +2576,6 @@ function providerCredentialSlug(value: string | undefined): string {
     .toLowerCase()
     .replace(/[^a-z0-9_.-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "key";
-}
-
-function localEstimateWindowStart(window: string, now: Date): Date {
-  const start = new Date(now);
-  if (window === "5h") {
-    start.setHours(start.getHours() - 5);
-    return start;
-  }
-  if (window === "weekly") {
-    start.setDate(start.getDate() - start.getDay());
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-  if (window === "monthly") {
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-  start.setHours(0, 0, 0, 0);
-  return start;
-}
-
-function localEstimateResetAt(window: string, now: Date): Date {
-  const resetAt = localEstimateWindowStart(window, now);
-  if (window === "5h") {
-    resetAt.setHours(resetAt.getHours() + 5);
-    return resetAt;
-  }
-  if (window === "weekly") {
-    resetAt.setDate(resetAt.getDate() + 7);
-    return resetAt;
-  }
-  if (window === "monthly") {
-    resetAt.setMonth(resetAt.getMonth() + 1);
-    return resetAt;
-  }
-  resetAt.setDate(resetAt.getDate() + 1);
-  return resetAt;
 }
 
 function statusFromMeters(
