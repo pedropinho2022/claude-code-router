@@ -44,6 +44,8 @@ import { RequestRouteTraceRecorder } from "@ccr/core/observability/route-trace";
 import { coreGatewayUsageAttributionConfig } from "@ccr/core/gateway/core-runtime/config-compiler";
 import { providerModelPricingForUsage } from "@ccr/core/models/pricing-service";
 import { fetchWithSystemProxy } from "@ccr/core/proxy/system-proxy-fetch";
+import { isRerankRequest, prepareRerankUpstreamRequest } from "@ccr/core/gateway/features/rerank";
+import { providerBudgetBlock, providerBudgetBlockMessage } from "@ccr/core/gateway/limits/provider-budget";
 import { clientClosedRequestStatusCode, clientDisconnectMessage, coreGatewayAuthHeader, resolveStreamRequestLogOutcome, UpstreamRequestError } from "@ccr/core/gateway/internal/shared";
 import type { BrowserWebSearchMcpIntegration, BrowserWebSearchProtocolRecord, UpstreamFetchResult } from "@ccr/core/gateway/internal/shared";
 import { cancelResponseBody, destroyResponseStreams, fetchUpstreamWithFallback, mergeFallbackResponseHeaders, rewriteCapabilityResponseHeaders, uniqueStreams, upstreamResponseHeaders } from "@ccr/core/gateway/upstream/executor";
@@ -359,6 +361,72 @@ export class GatewayRequestPipeline {
         });
         response.writeHead(200, Object.fromEntries(filteredResponseHeaders(modelHeaders)));
         response.end(responseText);
+        return;
+      }
+
+      if (isRerankRequest(method, path)) {
+        if (!reserveApiKeyLimits(apiKey, request, response, bodyToForward)) {
+          return;
+        }
+        const prepared = prepareRerankUpstreamRequest(this.config, bodyToForward ?? requestBody);
+        if ("error" in prepared) {
+          sendJson(response, prepared.statusCode, { error: { message: prepared.error, type: "invalid_request_error" } });
+          writeRequestLog(prepared.statusCode, new Headers(), "", false, prepared.error);
+          return;
+        }
+        const rerank = prepared.request;
+        routedModel = rerank.routedModel;
+        const deniedRerankModel = profileDeniedModel(activeConfig, authenticatedProfile, modelBeforeRouting, rerank.routedModel);
+        if (deniedRerankModel) {
+          sendJson(response, 403, {
+            error: { code: "profile_model_not_allowed", message: `Model "${deniedRerankModel}" is not allowed for this profile.` }
+          });
+          return;
+        }
+        const budgetBlock = await providerBudgetBlock(rerank.provider);
+        if (budgetBlock) {
+          const message = providerBudgetBlockMessage(budgetBlock);
+          sendJson(response, 402, { error: { code: "budget_exceeded", message, type: "budget_exceeded" }, type: "error" });
+          writeRequestLog(402, new Headers(), "", false, message);
+          return;
+        }
+        bodyToForward = rerank.body;
+        let upstreamResponse: Response;
+        try {
+          upstreamResponse = await fetchWithSystemProxy(rerank.url, {
+            body: rerank.body.toString("utf8"),
+            headers: rerank.headers,
+            method: "POST",
+            signal: upstreamAbortController.signal
+          });
+        } catch (error) {
+          const message = `Rerank upstream ${rerank.url} failed: ${formatError(error)}`;
+          if (!response.headersSent) {
+            sendJson(response, 502, { error: { message, type: "upstream_error" } });
+          }
+          writeRequestLog(502, new Headers(), "", false, message);
+          return;
+        }
+        const responseText = await upstreamResponse.text();
+        const rerankHeaders = new Headers({
+          "content-type": upstreamResponse.headers.get("content-type") ?? "application/json",
+          "x-ccr-routed-model": sanitizeHeaderValue(rerank.routedModel)
+        });
+        response.writeHead(upstreamResponse.status, Object.fromEntries(rerankHeaders));
+        response.end(responseText);
+        recordUsage({
+          bodyText: responseText,
+          client,
+          durationMs: Date.now() - startedAt,
+          fallbackModel: rerank.routedModel,
+          method,
+          path,
+          providerName: rerank.provider.name,
+          requestId,
+          responseHeaders: rerankHeaders,
+          statusCode: upstreamResponse.status
+        });
+        writeRequestLog(upstreamResponse.status, rerankHeaders, responseText, false, upstreamResponse.ok ? undefined : `HTTP ${upstreamResponse.status}`);
         return;
       }
 
