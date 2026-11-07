@@ -281,7 +281,9 @@ async function transformAntigravityRequest(input: ProviderPluginInput, plugin: R
   if (!project) {
     return { error: "Antigravity cloudaicompanionProject was not resolved from loadCodeAssist.", ok: false };
   }
-  const body = isRecord(input.upstreamRequest.body) ? sanitizeAntigravityToolSchemas(input.upstreamRequest.body, model) : {};
+  const body = isRecord(input.upstreamRequest.body)
+    ? withThoughtSignatureFallback(sanitizeAntigravityToolSchemas(input.upstreamRequest.body, model), model)
+    : {};
   return {
     ok: true,
     value: {
@@ -299,6 +301,35 @@ async function transformAntigravityRequest(input: ProviderPluginInput, plugin: R
       url: `${url.origin}/v1internal:${action}${antigravityQuery(url)}`
     }
   };
+}
+
+// Gemini 3 rejects a model turn whose first functionCall has no thoughtSignature
+// ("Function call is missing a thought_signature ... position N"). OpenAI-style
+// clients (litellm, Strix) drop the signature from tool calls, and the gateway's
+// in-memory id -> signature cache misses after a gateway restart or a switch of
+// account or model. Google documents this placeholder for exactly that case.
+export const geminiSkipThoughtSignature = "skip_thought_signature_validator";
+
+export function withThoughtSignatureFallback(body: Record<string, unknown>, model: string): Record<string, unknown> {
+  if (/^claude/i.test(model) || !Array.isArray(body.contents)) {
+    return body;
+  }
+  let changed = false;
+  const contents = body.contents.map((content: unknown) => {
+    if (!isRecord(content) || content.role !== "model" || !Array.isArray(content.parts)) {
+      return content;
+    }
+    const firstCall = content.parts.findIndex((part: unknown) => isRecord(part) && isRecord(part.functionCall));
+    const part = firstCall >= 0 ? content.parts[firstCall] : undefined;
+    if (!isRecord(part) || stringValue(part.thoughtSignature) || stringValue(part.thought_signature)) {
+      return content;
+    }
+    changed = true;
+    const parts = [...content.parts];
+    parts[firstCall] = { ...part, thoughtSignature: geminiSkipThoughtSignature };
+    return { ...content, parts };
+  });
+  return changed ? { ...body, contents } : body;
 }
 
 // Keeps alt=sse for streamGenerateContent; drops the placeholder API key,

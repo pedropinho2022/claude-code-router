@@ -7,7 +7,9 @@ import { createDefaultAppConfig } from "@ccr/core/config/default-config.ts";
 import { compileCoreGatewayConfig } from "@ccr/core/gateway/core-runtime/config-compiler.ts";
 import {
   createGatewayPlugin,
-  isLocalAgentOauthProviderPlugin
+  geminiSkipThoughtSignature,
+  isLocalAgentOauthProviderPlugin,
+  withThoughtSignatureFallback
 } from "@ccr/core/gateway/core-runtime/local-agent-auth-provider-hook.ts";
 import { virtualApplyPatchToolName } from "@ccr/core/gateway/internal/shared.ts";
 
@@ -306,6 +308,41 @@ test("Antigravity local agent request hook wraps the public Gemini call into v1i
   assert.equal(requestResult.value.body.model, "gemini-3-pro-preview");
   assert.deepEqual(requestResult.value.body.request, { contents: [] });
   assert.match(requestResult.value.headers["user-agent"], /^antigravity\/hub\//);
+});
+
+test("Antigravity request hook fills a missing Gemini thought signature on each model turn", async () => {
+  const [hook] = createGatewayPlugin({ config: { providerPlugins: [antigravityOauthProviderPlugin()] } }).providerHooks;
+  const contents = [
+    { parts: [{ text: "run the tool" }], role: "user" },
+    // Signature kept by the gateway cache: left alone.
+    { parts: [{ functionCall: { args: {}, name: "probe" }, thoughtSignature: "real-sig" }], role: "model" },
+    { parts: [{ functionResponse: { name: "probe", response: { content: "ok" } } }], role: "user" },
+    // Signature lost (client dropped it, cache missed): placeholder on the first call only.
+    { parts: [{ text: "thinking" }, { functionCall: { args: { n: 1 }, name: "probe" } }, { functionCall: { args: { n: 2 }, name: "probe" } }], role: "model" },
+    { parts: [{ functionResponse: { name: "probe", response: { content: "ok" } } }], role: "user" }
+  ];
+
+  const result = await hook.transformRequest({
+    upstreamRequest: {
+      body: { contents },
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      url: "https://daily-cloudcode-pa.googleapis.com/v1beta/models/gemini-3.8-flash-high:streamGenerateContent?alt=sse"
+    }
+  });
+
+  assert.equal(result.ok, true);
+  const sent = result.value.body.request.contents;
+  assert.equal(sent[1].parts[0].thoughtSignature, "real-sig");
+  assert.equal(sent[3].parts[0].thoughtSignature, undefined);
+  assert.equal(sent[3].parts[1].thoughtSignature, geminiSkipThoughtSignature);
+  assert.equal(sent[3].parts[2].thoughtSignature, undefined);
+  assert.equal(contents[3].parts[1].thoughtSignature, undefined, "the caller's body is not mutated");
+
+  const claudeBody = { contents: [contents[3]] };
+  assert.equal(withThoughtSignatureFallback(claudeBody, "claude-sonnet-4-6"), claudeBody);
+  const noCalls = { contents: [contents[0]] };
+  assert.equal(withThoughtSignatureFallback(noCalls, "gemini-3-pro"), noCalls);
 });
 
 test("Antigravity local agent request hook keeps alt=sse and wraps the request only once", async () => {
